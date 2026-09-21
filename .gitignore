@@ -1,0 +1,8 @@
+.DS_Store
+*.skill
+node_modules/
+__pycache__/
+*.pyc
+
+# A record belongs to the repo being worked on, not to this one.
+.groundwork/

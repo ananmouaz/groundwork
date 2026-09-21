@@ -1,0 +1,11 @@
+{
+  "name": "groundwork",
+  "version": "0.1.0",
+  "description": "Record the facts, blast radius and invariants of a change before writing production code, then have a fresh agent hunt that record for what is missing.",
+  "license": "MIT",
+  "author": {
+    "name": "Mouaz",
+    "url": "https://github.com/ananmouaz"
+  },
+  "hooks": "./hooks/hooks.json"
+}

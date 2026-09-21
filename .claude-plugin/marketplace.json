@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "groundwork",
+  "description": "groundwork — write down what you believe about the repo before you write the code.",
+  "owner": {
+    "name": "Mouaz",
+    "url": "https://github.com/ananmouaz"
+  },
+  "plugins": [
+    {
+      "name": "groundwork",
+      "source": "./",
+      "description": "Record the facts, blast radius and invariants of a change before writing production code, then have a fresh agent hunt that record for what is missing. Ships the record validator, the pre-edit hook, and the /groundwork and /groundwork-hunt commands.",
+      "version": "0.1.0",
+      "category": "productivity"
+    }
+  ]
+}
