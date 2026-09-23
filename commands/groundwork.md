@@ -17,10 +17,11 @@ Follow the skill exactly:
   deciding the enumeration is finished.
 - Write invariants so that a single counterexample kills them, and name that
   counterexample after `breaks if:`.
-- Validate with `python3 skills/groundwork/scripts/validate_record.py` and fix
-  every violation.
-- Then start round 1 as a hunt (`/groundwork-hunt <record> 1 hunt`) in a fresh
-  agent. Fold its absences into the record, use confirmations for that changed
-  slice, and finish with a full hunt. Never exceed three hunts.
+- Validate with `python3 skills/groundwork/scripts/validate_record.py <record> --pre-hunt`
+  and fix every violation.
+- Then run exactly one fresh-agent hunt (`/groundwork-hunt <record>`). Fold its
+  material findings into the record once, add the completed H1 row, run the
+  validator without `--pre-hunt`, and begin implementation. Never run a
+  confirmation, closing, or second hunt.
 
 Do not write production code in this command. The record is the deliverable.

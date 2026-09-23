@@ -10,9 +10,6 @@ failure names the rule that stopped working rather than "the record is bad".
 import importlib.util
 import os
 import re
-import shutil
-import subprocess
-import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,8 +29,9 @@ def read(name):
         return handle.read()
 
 
-def codes(text):
-    return [item.code for item in validate_record.validate(text)]
+def codes(text, require_hunt=True):
+    return [item.code for item in validate_record.validate(
+        text, require_hunt=require_hunt)]
 
 
 class RecordShape(unittest.TestCase):
@@ -167,61 +165,50 @@ class RecordShape(unittest.TestCase):
         # Not every keyboard produces an em dash at 2am.
         self.assertEqual(codes(self.clean.replace(" — ", " -- ")), [])
 
-    def test_four_full_hunts_are_rejected(self):
-        extra = "\n- H2 — confirmation — gaps — 1\n- H3 — hunt — gaps — 1\n" \
-                "- H4 — hunt — gaps — 1\n- H5 — hunt — gaps — 1\n"
+    def test_zero_hunts_fails_before_implementation(self):
+        self.assertOnly("GW018", self.clean.replace(
+            "- H1 — hunt — complete — 0", "none"))
+
+    def test_zero_hunts_passes_pre_hunt_validation(self):
+        draft = self.clean.replace("- H1 — hunt — complete — 0", "none")
+        self.assertEqual(codes(draft, require_hunt=False), [])
+
+    def test_a_hunt_with_material_findings_passes(self):
+        self.assertEqual(codes(self.clean.replace(
+            "- H1 — hunt — complete — 0", "- H1 — hunt — complete — 3")), [])
+
+    def test_a_second_hunt_is_rejected(self):
+        extra = "\n- H2 — hunt — complete — 0\n"
         self.assertFires("GW019", self.clean + extra)
 
-    def test_two_complete_verdicts_are_rejected(self):
-        extra = "\n- H2 — confirmation — complete — 0\n"
-        self.assertFires("GW020", self.clean + extra)
-
-    def test_hunt_rounds_must_be_consecutive(self):
+    def test_hunt_id_must_be_h1(self):
         self.assertFires("GW018", self.clean.replace("- H1", "- H2"))
 
-    def test_round_one_must_be_a_hunt(self):
+    def test_confirmation_is_not_a_valid_hunt(self):
         broken = self.clean.replace(
             "- H1 — hunt — complete — 0",
-            "- H1 — confirmation — gaps — 1")
+            "- H1 — confirmation — complete — 0")
         self.assertFires("GW018", broken)
 
-    def test_closing_complete_round_must_be_a_hunt(self):
-        broken = self.clean.replace(
-            "- H1 — hunt — complete — 0",
-            "- H1 — hunt — gaps — 1\n- H2 — confirmation — complete — 0")
-        self.assertFires("GW018", broken)
+    def test_incomplete_hunt_is_rejected(self):
+        self.assertFires("GW018", self.clean.replace(
+            "- H1 — hunt — complete — 0", "- H1 — hunt — gaps — 1"))
 
-
-class TreeState(unittest.TestCase):
-    def setUp(self):
-        self.project = tempfile.mkdtemp(prefix="groundwork-tree-")
-        subprocess.check_call(["git", "init", "-q"], cwd=self.project)
-        subprocess.check_call(["git", "config", "user.email", "test@example.com"],
-                              cwd=self.project)
-        subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.project)
-        with open(os.path.join(self.project, "tracked.txt"), "w") as handle:
-            handle.write("base\n")
-        subprocess.check_call(["git", "add", "tracked.txt"], cwd=self.project)
-        subprocess.check_call(["git", "commit", "-qm", "base"], cwd=self.project)
-
-    def tearDown(self):
-        shutil.rmtree(self.project, ignore_errors=True)
-
-    def record_for_tree(self):
-        text = read("clean.md")
-        digest = validate_record.tree_digest(self.project)
-        return re.sub(r"(?m)^Tree: [0-9a-f]{40}$", "Tree: " + digest, text)
-
-    def test_recorded_tree_passes(self):
+    def test_tree_digest_is_structural_not_a_freshness_gate(self):
         self.assertEqual(validate_record.validate(
-            self.record_for_tree(), project=self.project), [])
+            self.clean, project="/a/different/worktree"), [])
 
-    def test_tree_that_moved_mid_hunt_is_rejected(self):
-        record = self.record_for_tree()
-        with open(os.path.join(self.project, "tracked.txt"), "a") as handle:
-            handle.write("moved\n")
-        self.assertIn("GW017", [item.code for item in validate_record.validate(
-            record, project=self.project)])
+    def test_malformed_tree_digest_is_rejected(self):
+        self.assertOnly("GW017", self.clean.replace(
+            "Tree: da39a3ee5e6b4b0d3255bfef95601890afd80709", "Tree: stale"))
+
+    def test_non_material_review_notes_do_not_become_failures(self):
+        annotated = self.clean.replace(
+            "- H1 — hunt — complete — 0",
+            "- H1 — hunt — complete — 0\n"
+            "  - rejected: citation line could be more precise; claim remains true\n"
+            "  - rejected: inventorying unrelated docs would not change implementation")
+        self.assertEqual(codes(annotated), [])
 
 
 class ReportedOutput(unittest.TestCase):
@@ -240,6 +227,26 @@ class ReportedOutput(unittest.TestCase):
         emitted = set(re.findall(r'Violation\([^,]+,\s*"(GW[0-9]{3})"', source))
         self.assertTrue(emitted)
         self.assertEqual(emitted, documented)
+
+
+class WorkflowDocumentation(unittest.TestCase):
+    def test_one_hunt_is_terminal_and_no_later_hunt_is_suggested(self):
+        paths = [
+            os.path.join(ROOT, "skills", "groundwork", "SKILL.md"),
+            os.path.join(ROOT, "skills", "groundwork", "references", "hunt.md"),
+            os.path.join(ROOT, "commands", "groundwork.md"),
+            os.path.join(ROOT, "commands", "groundwork-hunt.md"),
+        ]
+        documents = []
+        for path in paths:
+            with open(path) as handle:
+                documents.append(handle.read())
+        text = "\n".join(documents)
+        self.assertIn("Groundwork runs once before implementation", text)
+        self.assertNotIn("finish with a hunt", text)
+        self.assertNotIn("starts the next round", text)
+        self.assertNotIn("At most three hunts", text)
+        self.assertIn("Do not suggest or run a\nsecond hunt", text)
 
 
 if __name__ == "__main__":

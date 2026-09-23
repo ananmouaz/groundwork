@@ -9,8 +9,7 @@ python3 tests/test_validate_record.py "$@"
 python3 tests/test_hook.py "$@"
 python3 tests/test_hunt_lock.py "$@"
 
-# The clean fixture is validated in a clean throwaway repository because Tree:
-# deliberately binds a record to the repository state it describes.
+# Validate the completed fixture through the same file-based CLI used by hooks.
 FIXTURE_REPO=$(mktemp -d "${TMPDIR:-/tmp}/groundwork-fixture.XXXXXX")
 trap 'rm -rf "$FIXTURE_REPO"' EXIT
 git -C "$FIXTURE_REPO" init -q
@@ -25,7 +24,8 @@ python3 skills/groundwork/scripts/validate_record.py \
   "$FIXTURE_REPO/.groundwork/record.md"
 
 # The template has to stay invalid: a half-filled record must not pass.
-if python3 skills/groundwork/scripts/validate_record.py templates/RECORD.template.md --quiet; then
+if python3 skills/groundwork/scripts/validate_record.py \
+  templates/RECORD.template.md --pre-hunt --quiet; then
   echo "test.sh: the template validated — placeholders are no longer caught" >&2
   exit 1
 fi

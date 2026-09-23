@@ -1,7 +1,7 @@
 {
   "name": "groundwork",
-  "version": "0.2.1",
-  "description": "Record the facts, blast radius and invariants of a change before writing production code, then have a fresh agent hunt that record for what is missing.",
+  "version": "0.3.0",
+  "description": "Record a non-trivial change before implementation, then run exactly one fresh-agent hunt for material absences.",
   "license": "MIT",
   "author": {
     "name": "Mouaz",

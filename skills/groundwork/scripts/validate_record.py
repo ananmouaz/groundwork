@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Validate a groundwork record.
 
-A record is a markdown file with six sections. This script checks the parts a
+A record is a markdown file with seven sections. This script checks the parts a
 machine can check: that every fact carries a command, every blast-radius row
 carries a verdict, every invariant carries a counterexample, and every plan
-step cites the evidence it rests on.
+step cites the evidence it rests on. Before implementation it also requires
+evidence of exactly one completed hunt.
 
 It does not check whether any of that is *true*. That is the hunt's job, and
 the hunt is a second agent reading this record against the repo.
@@ -13,6 +14,7 @@ Usage:
     validate_record.py [RECORD]            human-readable violations
     validate_record.py [RECORD] --json     machine-readable, for the hook
     validate_record.py [RECORD] --quiet    exit code only
+    validate_record.py [RECORD] --pre-hunt validate structure before the hunt
     validate_record.py --rules             print the rule table
 
 RECORD defaults to $GROUNDWORK_RECORD, then .groundwork/<branch>.md, then
@@ -22,7 +24,6 @@ Exit codes: 0 clean, 1 violations found, 2 the record could not be read.
 """
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -81,10 +82,9 @@ RULES = [
     ("GW014", "a row refers to an id that does not exist"),
     ("GW015", "template placeholder text was left in"),
     ("GW016", "an unknown names no way to resolve it"),
-    ("GW017", "Tree is missing, malformed, or no longer matches the working tree"),
-    ("GW018", "a hunt row is malformed or rounds are not consecutive"),
-    ("GW019", "the record contains more than three full hunts"),
-    ("GW020", "more than one hunt row claims completeness"),
+    ("GW017", "Tree is missing or malformed"),
+    ("GW018", "exactly one completed hunt is required before implementation"),
+    ("GW019", "more than one hunt is recorded"),
 ]
 
 
@@ -121,10 +121,11 @@ def default_record_path():
     return os.path.join(".groundwork", "record.md")
 
 
-def current_branch():
+def current_branch(project=None):
     try:
         out = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=project,
             stderr=subprocess.DEVNULL,
         )
     except (OSError, subprocess.CalledProcessError):
@@ -286,19 +287,7 @@ def check_unknowns(body, violations, unknown_ids):
                 "verdict is UNKNOWN but no unknown carries %s" % ident))
 
 
-def tree_digest(project):
-    """Return the first field of `git status --porcelain | shasum`."""
-    try:
-        output = subprocess.check_output(
-            ["git", "status", "--porcelain"], cwd=project,
-            stderr=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return hashlib.sha1(output).hexdigest()
-
-
-def check_tree(lines, violations, project):
+def check_tree(lines, violations):
     found = []
     for number, raw in enumerate(lines, start=1):
         if raw.startswith("Tree:"):
@@ -314,60 +303,29 @@ def check_tree(lines, violations, project):
         violations.append(Violation(
             number, "GW017", "", "Tree must hold the 40-character shasum"))
         return
-    if project is None:
-        return
-    actual = tree_digest(project)
-    if actual is None:
-        violations.append(Violation(
-            number, "GW017", "", "could not read the current git working tree"))
-    elif match.group(1).lower() != actual:
-        violations.append(Violation(
-            number, "GW017", "",
-            "working tree moved: recorded %s, current %s" %
-            (match.group(1).lower(), actual)))
 
 
-def check_hunts(body, violations):
+def check_hunts(body, violations, require_hunt):
     rows = rows_of(body)
-    hunts = 0
-    complete = 0
-    for expected_round, (number, text) in enumerate(rows, start=1):
-        fields = [field.strip() for field in FIELD_RE.split(text)]
-        ident = row_id(number, fields, "H", violations)
-        if ident is None:
-            continue
-        valid = (len(fields) == 4 and
-                 fields[1] in ("hunt", "confirmation") and
-                 fields[2] in ("gaps", "complete", "widened") and
-                 re.match(r"^[0-9]+$", fields[3]))
-        if not valid or ident != "H%d" % expected_round:
+    if not rows:
+        if require_hunt:
+            line = body[0][0] if body else 1
             violations.append(Violation(
-                number, "GW018", ident,
-                "use '- HN — hunt|confirmation — gaps|complete|widened — <absence count>' "
-                "with consecutive rounds"))
-            continue
-        if expected_round == 1 and fields[1] != "hunt":
-            violations.append(Violation(
-                number, "GW018", ident, "round 1 must be a full hunt"))
-        if fields[2] == "complete" and fields[1] != "hunt":
-            violations.append(Violation(
-                number, "GW018", ident, "the closing complete round must be a hunt"))
-        if fields[2] == "complete" and (fields[3] != "0" or expected_round != len(rows)):
-            violations.append(Violation(
-                number, "GW018", ident,
-                "complete must be the final row and carry zero absences"))
-        if fields[1] == "hunt":
-            hunts += 1
-        if fields[2] == "complete":
-            complete += 1
-    if hunts > 3:
+                line, "GW018", "", "add '- H1 — hunt — complete — <material finding count>'"))
+        return
+    if len(rows) > 1:
         violations.append(Violation(
-            rows[-1][0] if rows else 1, "GW019", "",
-            "groundwork is not clean after three hunts; stop and name the open absence ids"))
-    if complete > 1:
+            rows[1][0], "GW019", "", "Groundwork runs once; remove every row after H1"))
+
+    number, text = rows[0]
+    fields = [field.strip() for field in FIELD_RE.split(text)]
+    ident = row_id(number, fields, "H", violations)
+    valid = (ident == "H1" and len(fields) == 4 and fields[1] == "hunt" and
+             fields[2] == "complete" and re.match(r"^[0-9]+$", fields[3]))
+    if not valid:
         violations.append(Violation(
-            rows[-1][0] if rows else 1, "GW020", "",
-            "only one round may claim completeness"))
+            number, "GW018", ident,
+            "use '- H1 — hunt — complete — <material finding count>'"))
 
 
 def row_id(number, fields, prefix, violations):
@@ -380,13 +338,13 @@ def row_id(number, fields, prefix, violations):
     return match.group(1) + match.group(2)
 
 
-def validate(text, project=None):
+def validate(text, project=None, require_hunt=True):
     lines = text.splitlines()
     violations = []
     sections = parse_sections(lines)
     check_structure(sections, violations)
     check_placeholders(lines, violations)
-    check_tree(lines, violations, project)
+    check_tree(lines, violations)
 
     bodies = {}
     for name, heading_line, body in sections:
@@ -427,7 +385,7 @@ def validate(text, project=None):
     if "unknowns" in bodies:
         check_unknowns(bodies["unknowns"][1], violations, unknown_ids)
     if "hunts" in bodies:
-        check_hunts(bodies["hunts"][1], violations)
+        check_hunts(bodies["hunts"][1], violations, require_hunt)
 
     for name in SECTIONS:
         if name not in bodies:
@@ -450,6 +408,8 @@ def main(argv):
     parser.add_argument("record", nargs="?", default=None)
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--pre-hunt", action="store_true",
+                        help="validate record structure before its one hunt")
     parser.add_argument("--rules", action="store_true")
     args = parser.parse_args(argv)
 
@@ -474,7 +434,7 @@ def main(argv):
     while project != os.path.dirname(project) and not os.path.exists(
             os.path.join(project, ".git")):
         project = os.path.dirname(project)
-    violations = validate(text, project=project)
+    violations = validate(text, project=project, require_hunt=not args.pre_hunt)
     if args.as_json:
         print(json.dumps({
             "ok": not violations,

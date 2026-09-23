@@ -25,25 +25,24 @@ class HuntLock(unittest.TestCase):
             ["python3", SCRIPT] + list(args), cwd=self.project,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-    def test_round_acquires_and_owner_releases(self):
-        taken = self.run_lock("acquire", self.project, "1", "hunt")
+    def test_hunt_acquires_and_releases(self):
+        taken = self.run_lock("acquire", self.project)
         self.assertEqual(taken.returncode, 0, taken.stderr)
-        released = self.run_lock("release", self.project, "1")
+        released = self.run_lock("release", self.project)
         self.assertEqual(released.returncode, 0, released.stderr)
         self.assertFalse(os.path.exists(os.path.join(
             self.project, ".groundwork", "hunt.lock")))
 
-    def test_dead_round_is_reported_and_not_silently_taken_over(self):
-        self.assertEqual(self.run_lock(
-            "acquire", self.project, "2", "confirmation").returncode, 0)
+    def test_dead_hunt_is_reported_and_not_silently_taken_over(self):
+        self.assertEqual(self.run_lock("acquire", self.project).returncode, 0)
         path = os.path.join(self.project, ".groundwork", "hunt.lock")
         old = 1000
         os.utime(path, (old, old))
-        retried = self.run_lock("acquire", self.project, "3", "hunt")
+        retried = self.run_lock("acquire", self.project)
         self.assertEqual(retried.returncode, 3)
-        self.assertIn("dead round", retried.stderr)
+        self.assertIn("dead hunt", retried.stderr)
         with open(path) as handle:
-            self.assertIn("round=2", handle.read())
+            self.assertIn("started=", handle.read())
 
 
 if __name__ == "__main__":

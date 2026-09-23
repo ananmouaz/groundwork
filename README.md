@@ -3,6 +3,8 @@
 **Write down what you believe before you write the code, and have a second
 agent hunt it for what is missing.**
 
+> **Groundwork runs once before implementation. Shrike, Bugbot, or equivalent tools review the resulting code later.**
+
 Most bugs an AI writes are not logic errors. They are claims about the repo
 that were never checked, and second paths that were never enumerated.
 
@@ -95,26 +97,24 @@ outside them:
 | **5. Invariant nothing enforces** | no index, type, guard or test makes it true, so the plan can only hope |
 | **6. Unnamed unknown** | the record treats as settled what the repo does not decide: config, ordering, a race, another service |
 
-Out of scope, permanently: the design, the naming, the layout, whether the
-plan is elegant, whether another approach would be better, and anything that
-starts with "consider". Those are opinions about a plan. This is a check for
-holes in a record.
+An absence is material only when resolving it changes production code or
+configuration, required tests, the plan or blast radius, or a
+decision-blocking unknown. Citation precision, merely better command wording,
+unrelated documentation inventory, style, duplicates, and speculative surfaces
+without reachability evidence are rejected with a short reason.
 
 **Zero absences is a valid result**, and on a small change it is the common
 one. A hunter that pads its report trains you to stop reading it.
 
-Round 1 and the closing round are full hunts. Between them, confirmations read
-the previous frozen findings and check only changed rows plus the absences they
-close. A confirmation returns `widened` when that slice is insufficient. Full
-hunts stop after three; a fourth is an escalation, not another review.
-
-Every round freezes its findings at `.groundwork/hunts/<round>.md`. A two-hour
-`.groundwork/hunt.lock` keeps the project fixed while the reviewer reads it,
-and `Tree:` binds the record to `git status --porcelain | shasum`.
+The hunter freezes its one result at `.groundwork/hunt.md`. The implementing
+agent folds accepted findings into the record once, adds
+`H1 — hunt — complete — N`, validates, and starts implementation. A two-hour
+`.groundwork/hunt.lock` keeps the project fixed while the reviewer reads it.
+Editing the record after the hunt does not require another hunt.
 
 ## The validator
 
-`validate_record.py` checks the parts a machine can check — twenty rules, no
+`validate_record.py` checks the parts a machine can check — nineteen rules, no
 model, no network:
 
 ```
@@ -130,7 +130,10 @@ It cannot tell whether any of it is *true*. That is the hunt's job. What it
 buys is that the hunter spends its attention on what is missing instead of on
 formatting — and that a half-filled template cannot pass as a record.
 
-`--json` for tooling, `--quiet` for exit code only, `--rules` for the table.
+Use `--pre-hunt` while drafting. Without it, exactly one completed H1 row is
+required before implementation. `--json` is for tooling, `--quiet` for exit
+code only, and `--rules` prints the table. Tree digest shape is validated, but
+post-hunt record edits do not become a freshness failure.
 
 ## The hook
 
@@ -139,9 +142,11 @@ first. It is deliberately timid, because the fastest way to lose a guard is to
 make it annoying:
 
 - **Inert until a project opts in.** No `.groundwork/` directory, no guard.
+- **Uses the target file's worktree.** An unrelated session cwd cannot select
+  another worktree's record.
 - **Never normally guards** tests, markdown, dotfiles, or the record itself.
 - **Freezes every project write during a hunt.** A fresh lock denies in block
-  mode and warns in warn mode; a stale lock is reported as a dead round by the
+  mode and warns in warn mode; a stale lock is reported as a dead hunt by the
   next hunter.
 - **Warns by default.** The edit proceeds and the agent is told what the
   record is missing. `GROUNDWORK_MODE=block` denies instead; `off` disables it.
@@ -184,7 +189,7 @@ mkdir .groundwork
 
 ```
 /groundwork add idempotency to the refund webhook
-/groundwork-hunt .groundwork/my-branch.md 1 hunt
+/groundwork-hunt .groundwork/my-branch.md
 ```
 
 Or just ask: it triggers on "before you code", "what could this break",
@@ -196,18 +201,18 @@ Or just ask: it triggers on "before you code", "what could this break",
 |---|---|
 | `skills/groundwork/` | The method, in Agent Skills format — `SKILL.md` plus references loaded on demand |
 | `skills/groundwork/references/` | The record spec, the hunt protocol, and the second-path enumeration list |
-| `skills/groundwork/scripts/validate_record.py` | The validator — twenty mechanical rules |
-| `skills/groundwork/scripts/hunt_lock.py` | Atomic round lock with dead-round reporting |
+| `skills/groundwork/scripts/validate_record.py` | The validator — nineteen mechanical rules |
+| `skills/groundwork/scripts/hunt_lock.py` | Atomic one-hunt lock with stale-hunt reporting |
 | `hooks/` | The PreToolUse hook and its plugin wiring |
 | `commands/` | `/groundwork` and `/groundwork-hunt` |
 | `templates/RECORD.template.md` | The starting record. Fails validation until filled in, on purpose |
 | `dist/groundwork.flat.md` | Same method, one file, for agents with no skill loader |
-| `tests/` | Both suites: every validator rule, and the hook's process contract |
+| `tests/` | Validator, hook, and lock suites |
 
 ## Tests
 
 ```bash
-bash scripts/test.sh          # both suites, the fixture, and the template check
+bash scripts/test.sh          # all suites, the fixture, and the template check
 ```
 
 Python 3 standard library only. The validator suite breaks exactly one thing

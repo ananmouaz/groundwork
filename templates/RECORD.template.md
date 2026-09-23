@@ -1,6 +1,6 @@
 # groundwork — <what this change is called>
 
-Tree: <run `git status --porcelain | shasum` and paste its first field>
+Tree: <run `git status --porcelain | shasum` immediately before the one hunt and paste its first field>
 
 Copy this to `.groundwork/<branch>.md` and replace every angle-bracket
 placeholder. The validator fails while any placeholder survives, on purpose:
@@ -52,7 +52,8 @@ nothing left — but read the blast radius again first.
 
 ## Hunts
 
-Append one row after every frozen round. The final field is the number of
-absences that round returned.
+Before the hunt, leave this as `none` and validate with `--pre-hunt`. After the
+one hunt, fold accepted material findings into the record once and replace
+`none` with H1. The final field is the accepted material-finding count.
 
-- H1 — hunt — <gaps or complete> — <absence count>
+none
