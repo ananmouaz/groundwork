@@ -7,8 +7,8 @@ of their settings after a week:
 
 1. It is inert until a project opts in. No `.groundwork/` directory in the
    project means the hook allows everything and says nothing.
-2. It never blocks tests, markdown, or the record itself. Writing the record
-   is how you satisfy it.
+2. It normally never blocks tests, markdown, or the record itself. A live hunt
+   lock blocks or warns on every project write so the reviewed tree stays fixed.
 3. If anything about the hook itself fails — missing validator, unreadable
    payload, bad JSON — it allows the edit. A broken guard must not become a
    broken editor.
@@ -21,12 +21,14 @@ Modes, via GROUNDWORK_MODE:
 Other environment: GROUNDWORK_RECORD points at the record, GROUNDWORK_EXEMPT
 adds colon-separated substrings that are never guarded, GROUNDWORK_VALIDATOR
 points at validate_record.py.
+GROUNDWORK_LOCK_MAX_AGE and GROUNDWORK_LOCK_NOW exist for lock tests.
 """
 
 import json
 import os
 import re
 import sys
+import time
 
 GUARDED_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
@@ -53,6 +55,11 @@ MISSING = (
 INVALID = (
     "groundwork: the record %s does not validate yet.\n%s\n"
     "Fix those rows, then edit. `validate_record.py --rules` explains the codes."
+)
+
+LOCKED = (
+    "groundwork: a hunt is reading this project from a frozen tree.\n"
+    "Wait for %s to be removed before writing %s."
 )
 
 
@@ -125,6 +132,27 @@ def record_path(project, validator):
     return os.path.join(project, ".groundwork", "record.md")
 
 
+def active_hunt_lock(project):
+    path = os.path.join(project, ".groundwork", "hunt.lock")
+    if not os.path.isfile(path):
+        return None
+    now = int(os.environ.get("GROUNDWORK_LOCK_NOW", time.time()))
+    max_age = int(os.environ.get("GROUNDWORK_LOCK_MAX_AGE", "7200"))
+    if now - int(os.stat(path).st_mtime) > max_age:
+        return None
+    return path
+
+
+def inside_project(target, project):
+    absolute = target if os.path.isabs(target) else os.path.join(project, target)
+    try:
+        return os.path.commonpath((os.path.abspath(absolute), os.path.abspath(project))) == \
+            os.path.abspath(project)
+    except (AttributeError, ValueError):
+        prefix = os.path.abspath(project).rstrip(os.sep) + os.sep
+        return os.path.abspath(absolute).startswith(prefix)
+
+
 def decide(payload, project, plugin_root):
     """-> (decision, reason). decision is 'allow' or 'deny'."""
     if os.environ.get("GROUNDWORK_MODE", "warn").lower() == "off":
@@ -132,8 +160,17 @@ def decide(payload, project, plugin_root):
     if payload.get("tool_name") not in GUARDED_TOOLS:
         return "allow", None
 
-    target = payload.get("tool_input", {}).get("file_path") or ""
-    if not target or is_exempt(target):
+    tool_input = payload.get("tool_input", {})
+    target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+    if not target:
+        return "allow", None
+
+    lock = active_hunt_lock(project) if inside_project(target, project) else None
+    if lock:
+        blocking = os.environ.get("GROUNDWORK_MODE", "warn").lower() == "block"
+        return ("deny" if blocking else "allow"), LOCKED % (lock, target)
+
+    if is_exempt(target):
         return "allow", None
 
     # Opt-in: a project without a .groundwork directory is not using this.
@@ -151,7 +188,7 @@ def decide(payload, project, plugin_root):
         return ("deny" if blocking else "allow"), MISSING % record
 
     with open(record) as handle:
-        violations = validator.validate(handle.read())
+        violations = validator.validate(handle.read(), project=project)
     if not violations:
         return "allow", None
 

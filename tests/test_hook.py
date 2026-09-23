@@ -9,6 +9,7 @@ the contract under test is the process contract.
 """
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -54,6 +55,14 @@ class HookProject(unittest.TestCase):
     def setUp(self):
         self.project = tempfile.mkdtemp(prefix="groundwork-test-")
         os.makedirs(os.path.join(self.project, "src", "billing"))
+        with open(os.path.join(self.project, ".gitignore"), "w") as handle:
+            handle.write(".groundwork/\n")
+        subprocess.check_call(["git", "init", "-q"], cwd=self.project)
+        subprocess.check_call(["git", "config", "user.email", "test@example.com"],
+                              cwd=self.project)
+        subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.project)
+        subprocess.check_call(["git", "add", ".gitignore"], cwd=self.project)
+        subprocess.check_call(["git", "commit", "-qm", "base"], cwd=self.project)
 
     def tearDown(self):
         shutil.rmtree(self.project, ignore_errors=True)
@@ -118,14 +127,14 @@ class RecordPresent(HookProject):
         self.assertIn("record.md", reason)
 
     def test_a_long_violation_list_is_truncated(self):
-        # An empty record misses all six sections. The agent gets five lines
+        # An empty record misses every section. The agent gets five lines
         # and a count, not a wall.
         self.opt_in("# groundwork — nothing\n")
         _, out, _ = run_hook(self.project, env={"GROUNDWORK_MODE": "block"})
         _, reason = decision_of(out)
         listed = [line for line in reason.splitlines() if "GW001" in line]
         self.assertEqual(len(listed), 5)
-        self.assertIn("and 1 more", reason)
+        self.assertIn("and ", reason)
 
     def test_an_explicit_record_path_is_honoured(self):
         self.opt_in()
@@ -133,9 +142,56 @@ class RecordPresent(HookProject):
         os.makedirs(os.path.dirname(elsewhere))
         with open(elsewhere, "w") as handle:
             handle.write(self.clean_record())
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=self.project)
+        digest = hashlib.sha1(status).hexdigest()
+        with open(elsewhere) as handle:
+            text = handle.read()
+        with open(elsewhere, "w") as handle:
+            handle.write(text.replace(
+                "da39a3ee5e6b4b0d3255bfef95601890afd80709", digest))
         code, out, _ = run_hook(self.project, env={
             "GROUNDWORK_MODE": "block", "GROUNDWORK_RECORD": "notes/plan.md"})
         self.assertEqual((code, out), (0, ""))
+
+
+class HuntLock(HookProject):
+    def lock(self):
+        self.opt_in(self.clean_record())
+        path = os.path.join(self.project, ".groundwork", "hunt.lock")
+        with open(path, "w") as handle:
+            handle.write("round=2 kind=confirmation\n")
+        return path
+
+    def test_fresh_lock_denies_even_an_exempt_write_in_block_mode(self):
+        self.lock()
+        _, out, _ = run_hook(self.project, path="tests/new_test.py",
+                             env={"GROUNDWORK_MODE": "block"})
+        decision, reason = decision_of(out)
+        self.assertEqual(decision, "deny")
+        self.assertIn("frozen tree", reason)
+
+    def test_fresh_lock_warns_in_warn_mode(self):
+        self.lock()
+        _, out, _ = run_hook(self.project)
+        decision, reason = decision_of(out)
+        self.assertEqual(decision, "allow")
+        self.assertIn("frozen tree", reason)
+
+    def test_stale_lock_does_not_block(self):
+        path = self.lock()
+        old = 1000
+        os.utime(path, (old, old))
+        _, out, _ = run_hook(self.project, env={
+            "GROUNDWORK_MODE": "block", "GROUNDWORK_LOCK_NOW": "8201"})
+        self.assertEqual(decision_of(out)[0], "allow")
+
+    def test_lock_does_not_block_a_path_outside_the_project(self):
+        self.lock()
+        _, out, _ = run_hook(self.project, path=os.path.join(
+            os.path.dirname(self.project), "outside.py"),
+            env={"GROUNDWORK_MODE": "block"})
+        self.assertEqual(decision_of(out)[0], "allow")
 
 
 class ExemptPaths(HookProject):

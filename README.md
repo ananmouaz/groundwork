@@ -31,10 +31,12 @@ missing rows.
 
 ## What a record looks like
 
-Six sections. Ids on every row. Nothing that cannot be re-run or falsified.
+Seven sections. Ids on every row. Nothing that cannot be re-run or falsified.
 
 ```markdown
 # groundwork — idempotency key on the refund webhook
+
+Tree: da39a3ee5e6b4b0d3255bfef95601890afd80709
 
 ## Task
 A repeated `charge.refunded` delivery must return 200 without issuing a second refund.
@@ -59,6 +61,9 @@ Enumerated by: `rg -n "refundCharge\(" src/ tests/` → 6 hits
 
 ## Unknowns
 - U1 — whether the reconcile job in B3 reuses the provider event id — resolved by: `rg -n "event_id" src/jobs/reconcile.ts`
+
+## Hunts
+- H1 — hunt — complete — 0
 ```
 
 Four rules carry the method:
@@ -98,9 +103,18 @@ holes in a record.
 **Zero absences is a valid result**, and on a small change it is the common
 one. A hunter that pads its report trains you to stop reading it.
 
+Round 1 and the closing round are full hunts. Between them, confirmations read
+the previous frozen findings and check only changed rows plus the absences they
+close. A confirmation returns `widened` when that slice is insufficient. Full
+hunts stop after three; a fourth is an escalation, not another review.
+
+Every round freezes its findings at `.groundwork/hunts/<round>.md`. A two-hour
+`.groundwork/hunt.lock` keeps the project fixed while the reviewer reads it,
+and `Tree:` binds the record to `git status --porcelain | shasum`.
+
 ## The validator
 
-`validate_record.py` checks the parts a machine can check — sixteen rules, no
+`validate_record.py` checks the parts a machine can check — twenty rules, no
 model, no network:
 
 ```
@@ -125,7 +139,10 @@ first. It is deliberately timid, because the fastest way to lose a guard is to
 make it annoying:
 
 - **Inert until a project opts in.** No `.groundwork/` directory, no guard.
-- **Never guards** tests, markdown, dotfiles, or the record itself.
+- **Never normally guards** tests, markdown, dotfiles, or the record itself.
+- **Freezes every project write during a hunt.** A fresh lock denies in block
+  mode and warns in warn mode; a stale lock is reported as a dead round by the
+  next hunter.
 - **Warns by default.** The edit proceeds and the agent is told what the
   record is missing. `GROUNDWORK_MODE=block` denies instead; `off` disables it.
 - **Fails open.** Missing validator, unreadable payload, bad JSON — the edit
@@ -167,7 +184,7 @@ mkdir .groundwork
 
 ```
 /groundwork add idempotency to the refund webhook
-/groundwork-hunt                       # fresh agent, same record
+/groundwork-hunt .groundwork/my-branch.md 1 hunt
 ```
 
 Or just ask: it triggers on "before you code", "what could this break",
@@ -179,7 +196,8 @@ Or just ask: it triggers on "before you code", "what could this break",
 |---|---|
 | `skills/groundwork/` | The method, in Agent Skills format — `SKILL.md` plus references loaded on demand |
 | `skills/groundwork/references/` | The record spec, the hunt protocol, and the second-path enumeration list |
-| `skills/groundwork/scripts/validate_record.py` | The validator — sixteen mechanical rules |
+| `skills/groundwork/scripts/validate_record.py` | The validator — twenty mechanical rules |
+| `skills/groundwork/scripts/hunt_lock.py` | Atomic round lock with dead-round reporting |
 | `hooks/` | The PreToolUse hook and its plugin wiring |
 | `commands/` | `/groundwork` and `/groundwork-hunt` |
 | `templates/RECORD.template.md` | The starting record. Fails validation until filled in, on purpose |

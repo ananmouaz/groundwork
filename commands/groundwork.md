@@ -19,7 +19,8 @@ Follow the skill exactly:
   counterexample after `breaks if:`.
 - Validate with `python3 skills/groundwork/scripts/validate_record.py` and fix
   every violation.
-- Then run the hunt (`/groundwork-hunt`) in a fresh agent, fold its absences
-  back into the record, and only then write production code.
+- Then start round 1 as a hunt (`/groundwork-hunt <record> 1 hunt`) in a fresh
+  agent. Fold its absences into the record, use confirmations for that changed
+  slice, and finish with a full hunt. Never exceed three hunts.
 
 Do not write production code in this command. The record is the deliverable.

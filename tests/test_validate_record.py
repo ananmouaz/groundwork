@@ -10,6 +10,9 @@ failure names the rule that stopped working rather than "the record is bad".
 import importlib.util
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -163,6 +166,62 @@ class RecordShape(unittest.TestCase):
     def test_double_hyphen_separates_fields_too(self):
         # Not every keyboard produces an em dash at 2am.
         self.assertEqual(codes(self.clean.replace(" — ", " -- ")), [])
+
+    def test_four_full_hunts_are_rejected(self):
+        extra = "\n- H2 — confirmation — gaps — 1\n- H3 — hunt — gaps — 1\n" \
+                "- H4 — hunt — gaps — 1\n- H5 — hunt — gaps — 1\n"
+        self.assertFires("GW019", self.clean + extra)
+
+    def test_two_complete_verdicts_are_rejected(self):
+        extra = "\n- H2 — confirmation — complete — 0\n"
+        self.assertFires("GW020", self.clean + extra)
+
+    def test_hunt_rounds_must_be_consecutive(self):
+        self.assertFires("GW018", self.clean.replace("- H1", "- H2"))
+
+    def test_round_one_must_be_a_hunt(self):
+        broken = self.clean.replace(
+            "- H1 — hunt — complete — 0",
+            "- H1 — confirmation — gaps — 1")
+        self.assertFires("GW018", broken)
+
+    def test_closing_complete_round_must_be_a_hunt(self):
+        broken = self.clean.replace(
+            "- H1 — hunt — complete — 0",
+            "- H1 — hunt — gaps — 1\n- H2 — confirmation — complete — 0")
+        self.assertFires("GW018", broken)
+
+
+class TreeState(unittest.TestCase):
+    def setUp(self):
+        self.project = tempfile.mkdtemp(prefix="groundwork-tree-")
+        subprocess.check_call(["git", "init", "-q"], cwd=self.project)
+        subprocess.check_call(["git", "config", "user.email", "test@example.com"],
+                              cwd=self.project)
+        subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.project)
+        with open(os.path.join(self.project, "tracked.txt"), "w") as handle:
+            handle.write("base\n")
+        subprocess.check_call(["git", "add", "tracked.txt"], cwd=self.project)
+        subprocess.check_call(["git", "commit", "-qm", "base"], cwd=self.project)
+
+    def tearDown(self):
+        shutil.rmtree(self.project, ignore_errors=True)
+
+    def record_for_tree(self):
+        text = read("clean.md")
+        digest = validate_record.tree_digest(self.project)
+        return re.sub(r"(?m)^Tree: [0-9a-f]{40}$", "Tree: " + digest, text)
+
+    def test_recorded_tree_passes(self):
+        self.assertEqual(validate_record.validate(
+            self.record_for_tree(), project=self.project), [])
+
+    def test_tree_that_moved_mid_hunt_is_rejected(self):
+        record = self.record_for_tree()
+        with open(os.path.join(self.project, "tracked.txt"), "a") as handle:
+            handle.write("moved\n")
+        self.assertIn("GW017", [item.code for item in validate_record.validate(
+            record, project=self.project)])
 
 
 class ReportedOutput(unittest.TestCase):

@@ -1,5 +1,7 @@
 # groundwork — idempotency key on the refund webhook
 
+Tree: da39a3ee5e6b4b0d3255bfef95601890afd80709
+
 ## Task
 
 A repeated `charge.refunded` delivery must return 200 without issuing a second refund.
@@ -33,3 +35,7 @@ Enumerated by: `rg -n "refundCharge\(" src/ tests/` → 6 hits
 ## Unknowns
 
 - U1 — whether the reconcile job in B3 reuses the provider event id — resolved by: `rg -n "event_id" src/jobs/reconcile.ts`
+
+## Hunts
+
+- H1 — hunt — complete — 0

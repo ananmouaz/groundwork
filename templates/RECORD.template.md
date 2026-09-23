@@ -1,5 +1,7 @@
 # groundwork — <what this change is called>
 
+Tree: <run `git status --porcelain | shasum` and paste its first field>
+
 Copy this to `.groundwork/<branch>.md` and replace every angle-bracket
 placeholder. The validator fails while any placeholder survives, on purpose:
 a half-filled record is worse than none, because it looks finished.
@@ -47,3 +49,10 @@ What is still not known, and what would settle it. Write `none` if there is
 nothing left — but read the blast radius again first.
 
 - U1 — <the open question> — resolved by: <the command, file or person that answers it>
+
+## Hunts
+
+Append one row after every frozen round. The final field is the number of
+absences that round returned.
+
+- H1 — hunt — <gaps or complete> — <absence count>
