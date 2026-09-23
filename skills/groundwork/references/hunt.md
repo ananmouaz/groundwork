@@ -1,130 +1,121 @@
-# The hunt
+# The one hunt
 
-Instructions for the second agent. You did not write this record. That is the
-only reason your read is worth anything, so do not reconstruct the reasoning
-behind it — check it against the repository.
+> **Groundwork runs once before implementation. Shrike, Bugbot, or equivalent tools review the resulting code later.**
 
-The caller supplies the record, consecutive round number, and kind. Never pick
-the kind yourself. A later round also receives the previous frozen findings at
-`.groundwork/hunts/<n-1>.md`; never accept the author's reply or reasoning as
-evidence.
+You are the one fresh hunter. You did not write the record. Check it against
+the repository exactly once, freeze the result, and stop. There are no
+confirmation hunts, closing hunts, retries, or clearance rounds.
 
-## Round kinds
-
-**Hunt** means the full method below over the whole record. Round 1 and the
-closing round are hunts. No chain may exceed three hunts. If the third still
-has open absences, return them by id and say the record is not clean.
-
-**Confirmation** means read the previous findings, diff the record against the
-version described there, and check only the rows added or changed plus the
-absences those rows claim to close. Do not re-run unrelated facts or re-open
-unchanged SAFE rows. If closure depends on a wider caller, invariant, or
-surface, return `widened`; the caller starts the next round as a hunt.
-
-An absence already closed with repository evidence is not re-reported.
-Re-deriving a fact the previous round confirmed is waste, not thoroughness.
-
-## Freeze the round
+## Freeze the review
 
 Acquire the project lock before reading:
 
 ```bash
-python3 skills/groundwork/scripts/hunt_lock.py acquire <project> <round> <kind>
+python3 skills/groundwork/scripts/hunt_lock.py acquire <project>
 ```
 
-A fresh existing lock means another round owns the project. A lock older than
-two hours is a dead round: report its contents and stop. Never remove or replace
-it silently. Validate `Tree:` after acquiring the lock and again before
-freezing the result. Release only your own round's lock on every exit path:
+A fresh existing lock means the one hunt is already active. A lock older than
+two hours is a dead hunt: report its contents and stop. Never replace it
+silently. Validate the record structure after acquiring the lock:
 
 ```bash
-python3 skills/groundwork/scripts/hunt_lock.py release <project> <round>
+python3 skills/groundwork/scripts/validate_record.py <record> --pre-hunt
 ```
 
-## What you are looking for
+Release the lock on every exit path:
 
-**Absences.** Rows that should be in the record and are not, and rows that are
-in it without the evidence they claim. You are not reviewing the plan. You are
-not reviewing the design. You are checking a finite list for missing entries.
+```bash
+python3 skills/groundwork/scripts/hunt_lock.py release <project>
+```
 
-Six classes, and nothing outside them:
+## Six absence classes
 
-1. **Unverified claim.** A fact whose command does not prove it, or proves it
-   somewhere else: another file, another branch, another overload, another
-   environment, a stale line number, a command whose output was paraphrased
-   into something stronger than it said.
-2. **Second path.** Something that reads or writes the changed thing and is not
-   in the blast radius. This is the highest-yield class. See
-   `second-paths.md` for the shapes a symbol grep does not find.
-3. **Verdict without evidence.** A `SAFE` row whose reason is an assertion
-   rather than a read — "unrelated", "internal only", "not affected". Open the
-   file and decide for yourself.
-4. **Invariant already false.** The record claims this holds today. Find the
-   row, request, config or state where it does not.
-5. **Invariant nothing enforces.** Nothing in the repo makes it true. The plan
-   cannot preserve what nothing holds up, so the record needs to say what will
-   enforce it after the change.
-6. **Unnamed unknown.** The record treats as settled something the repo does
-   not decide: an environment variable, a deploy order, a concurrent writer,
-   another service's retry policy, a value that differs between local and
-   production.
+Use every class as a search lens, not a quota. Report zero findings when zero
+material absences survive.
+
+1. **Unverified claim.** Re-run each fact command. Report a claim only when the
+   command does not prove it or proves another file, branch, overload, or
+   environment.
+2. **Second path.** Re-run the enumeration with a wider net using
+   `second-paths.md`. Report a reader or writer the record omitted.
+3. **Verdict without evidence.** Open every SAFE row. Report it only when the
+   stated reason is not supported by the site.
+4. **Invariant already false.** Try to falsify each invariant with a real row,
+   request, configuration, or code path.
+5. **Invariant nothing enforces.** Identify the index, type, guard, test, or
+   runtime mechanism that holds each invariant up.
+6. **Unnamed unknown.** Find assumptions the repository cannot settle, such as
+   environment, ordering, concurrency, or another service's behavior.
+
+## Materiality gate
+
+A candidate is a finding only if resolving it changes at least one of:
+
+- production code or configuration;
+- test behavior or coverage needed for the change;
+- the implementation plan or blast radius;
+- a decision-blocking unknown that must be answered before coding.
+
+Accepted examples:
+
+- A cron worker reaches the changed code but is absent from the blast radius.
+- The invariant needs a unique index that the plan does not include.
+- Safe deployment depends on an external ordering guarantee that must be
+  answered before coding.
+
+Reject the following, and record a short reason:
+
+- citation or line-number nitpicks when the claim remains true;
+- commands that could be more precise but already verify the claim;
+- requests to inventory unrelated documentation;
+- stylistic improvements;
+- duplicate concerns already covered by an invariant or test;
+- speculative surfaces without evidence the change reaches them.
+
+For example, “the fact should quote line 42 instead of line 41” is rejected if
+the command still proves the claim. “Search every README” is rejected unless an
+executed snippet reaches the changed behavior. “A mobile app might call this”
+is rejected without evidence that the changed contract is exposed to it.
+
+The goal is the smallest record that makes implementation safe, not a perfect
+document.
 
 ## Method
 
-1. **Run the validator first.** `validate_record.py <record>`. Mechanical
-   violations are not your findings; if there are any, say so and stop — the
-   record is not ready to be hunted.
-2. **Re-run every command in the Facts section.** Do not read the evidence
-   column and believe it. Run the command. Independent commands go out
-   together in one message.
-3. **Re-run the enumeration wider than the record ran it.** Drop the path
-   filter, drop the parentheses, search the string form of the name, search
-   the schema, search sibling repositories if they are checked out. Diff your
-   hit list against the blast radius rows.
-4. **Open every SAFE row.** A SAFE verdict is a claim that someone read the
-   call site. Read it.
-5. **Try to falsify each invariant** with a real row, request or code path
-   before asking what enforces it.
-6. **Report only what survives.** If you cannot point at a file, a line, or a
-   command's output, you have a feeling, not a finding. Delete it.
-
-Steps 2 through 5 apply in full to a hunt. In a confirmation, apply them only
-to the changed-row and prior-absence slice described above.
+1. Run the pre-hunt validator. Mechanical violations are not findings; report
+   them, release the lock, and stop.
+2. Re-run every fact command.
+3. Widen the blast-radius enumeration and compare real hits with the rows.
+4. Open every SAFE site.
+5. Try to falsify every invariant and identify its enforcement.
+6. Apply the materiality gate to every candidate.
+7. Write the result once to `.groundwork/hunt.md`, make it read-only, release
+   the lock, and stop. Do not recommend another hunt.
 
 ## Output
 
-At most seven absences, ordered by what would cost the most to discover after
-the code is written. One block each:
+Report at most seven accepted material findings, ordered by the cost of finding
+them after implementation. Use stable ids:
 
+```text
+[A1] Second path — src/jobs/reconcile.ts:52 reaches refundCharge but is absent
+    Found by: rg -n "refundCharge" --glob '!tests/**' → 7 hits; record has 6
+    Why it is material: this worker also needs the new key and test coverage
+    Add to the record: a B row and a plan step
 ```
-[A2] Second path — src/jobs/reconcile.ts:52 calls refundCharge and is not in the blast radius
-    Found by: rg -n "refundCharge" --glob '!tests/**' → 7 hits; the record's list has 6
-    Why it matters: it replays yesterday's charges, so the new event-id key is absent there
-    Add to the record: a B row with a verdict, or a U row if the verdict needs a read
+
+Then list rejected candidates with a short reason, followed by coverage of all
+six lenses: commands re-run, SAFE rows opened, invariants tested, and anything
+that could not be checked.
+
+The frozen file must include the record path, `complete` verdict, tree digest,
+record hash, accepted count, accepted findings, rejected candidates, and
+coverage. It is evidence that the one hunt occurred. The implementing agent
+then folds accepted findings into the record once and adds:
+
+```markdown
+- H1 — hunt — complete — <accepted material finding count>
 ```
 
-Then one line of coverage: which commands you re-ran, which you could not, and
-what you did not check.
-
-Write the full result once to `.groundwork/hunts/<round>.md` with noclobber (or
-an equivalent exclusive create), then make it read-only. Include record path,
-round, kind, verdict, tree digest, a hash and exact copy of every reviewed row,
-every open/closed absence id, and coverage. That row snapshot is what lets a
-confirmation identify the record delta without seeing the author's reasoning.
-Never overwrite an earlier round. A later reviewer trusts the frozen evidence,
-not a paraphrase in the author's conversation.
-
-**Zero absences is a valid and common result.** Say it plainly, name the three
-to five things you specifically checked and found present, and stop. Padding a
-report to look useful is how a reviewer gets ignored — and once it is ignored,
-its real findings are worth nothing either.
-
-## Out of scope, permanently
-
-The design. The naming. The file layout. Whether the plan is elegant or
-whether another approach would be better. Test-coverage opinions. Anything
-phrased as "consider". Style of the record itself. Rewriting rows you could
-have read.
-
-If a finding cannot be phrased as *"the record does not contain X, and here is
-the command that shows X exists"*, it is not a finding.
+Changes made while folding findings do not invalidate the hunt and do not
+authorize another one.

@@ -10,8 +10,8 @@
     {
       "name": "groundwork",
       "source": "./",
-      "description": "Record the facts, blast radius and invariants of a change before writing production code, then have a fresh agent hunt that record for what is missing. Ships the record validator, the pre-edit hook, and the /groundwork and /groundwork-hunt commands.",
-      "version": "0.2.1",
+      "description": "Record a non-trivial change before implementation, then run exactly one fresh-agent hunt for material absences. Ships the validator, pre-edit hook, and /groundwork commands.",
+      "version": "0.3.0",
       "category": "productivity"
     }
   ]

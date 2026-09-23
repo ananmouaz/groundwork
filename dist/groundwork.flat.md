@@ -3,247 +3,158 @@
 
 # groundwork
 
-Write down what you believe about the repo, with the command that proves each
-belief, before any production code exists. Then hand the record to a fresh
-agent whose only job is to find what is absent from it.
+> **Groundwork runs once before implementation. Shrike, Bugbot, or equivalent tools review the resulting code later.**
 
-## Why this exists
+Groundwork improves the initial implementation plan. The implementing agent
+writes a finite, evidence-backed record; one fresh agent hunts that record for
+material absences; the implementing agent folds accepted findings in once;
+the validator passes; implementation starts. Groundwork is not an iterative
+review loop.
 
-Most bugs a coding agent writes are not reasoning errors. They are two things:
+## When to run it
 
-1. **A claim about the repo that was never checked.** "The handler already
-   validates this." It did, in the file the agent read forty minutes ago,
-   on a path that is not this one.
-2. **A second path that was never enumerated.** The change is correct for the
-   caller in the diff and wrong for the cron job, the admin action, the
-   migration, or the test double that also calls it.
-
-Both are absences. Neither is visible in the code the agent produces, which is
-why they survive a code review of that code — the reviewer reads what is
-there. They are visible in the *record*, because a record is a finite list and
-a list can be checked for missing rows.
-
-Measured on one repo's 51 review-bot findings: about a fifth were unverified
-claims about the repo, and about a third were an unenumerated second path.
-Both classes are cheaper to catch before the code exists than after.
-
-**The economics: reviewing a record costs one agent call. Finding the same
-defect after the push costs a review cycle, a red gate and a fix commit.**
-
-## When to run this
-
-Run it when the change is non-trivial: it touches a shared function, a schema,
-a public contract, money, auth, or anything with more than one caller. Run it
-when you are about to edit a file whose callers you have not read.
-
-Do not run it for a typo, a string change, a new isolated file, or a revert.
-The record costs a few minutes; on a trivial change that is the whole budget.
-
-This skill is for code that does not exist yet. For code that already exists,
-review it instead.
+Run Groundwork before a non-trivial change: a shared function, schema, public
+contract, money, auth, or anything with more than one caller. Do not run it
+for a typo, a string-only change, a new isolated file, a revert, or code that
+already exists and needs review.
 
 ## The record
 
-One markdown file, seven sections, at `.groundwork/<branch>.md`. Start from
-`templates/RECORD.template.md`. The full field spec is in
-`references/record-format.md`; read it before writing the first record.
+Create `.groundwork/<branch-slug>.md` from
+`templates/RECORD.template.md`. Read `references/record-format.md` before
+writing the first record and `references/second-paths.md` before completing
+the blast radius.
 
 ```markdown
-## Task          one sentence: the behavior that is different afterwards
-## Facts         F1..Fn  claim — `command that proved it` → the output line
-## Blast radius  B1..Bn  site — what it does — SAFE|UPDATE|UNKNOWN — why
-## Invariants    I1..In  a claim that can be false — breaks if: counterexample
-## Plan          P1..Pn  the edit — rests on F1, B2
-## Unknowns      U1..Un  the open question — resolved by: what would settle it
-## Hunts         H1..Hn  kind — verdict — absence count
+## Task          one sentence: the behavior that differs afterwards
+## Facts         F1..Fn  claim — `command that proved it` → output
+## Blast radius  B1..Bn  site — role — SAFE|UPDATE|UNKNOWN — why
+## Invariants    I1..In  claim — breaks if: counterexample
+## Plan          P1..Pn  edit — rests on F1, B2
+## Unknowns      U1..Un  question — resolved by: what settles it
+## Hunts         exactly one H1 row after the hunt
 ```
 
-`Tree:` below the title holds the first field from
-`git status --porcelain | shasum`. Refresh it immediately before every review
-round. The validator rejects a record as soon as the working tree moves.
+Four rules carry the method:
 
-Four rules carry the whole method:
+- **No fact without a command.** If the command and its output do not prove
+  the claim, write an unknown instead.
+- **No blast-radius list without the command that produced it.** Search symbol
+  names and the second paths that do not spell the symbol.
+- **No invariant that cannot be false.** Name the concrete counterexample.
+- **No plan step that cites nothing.** Every edit points to the facts, blast
+  rows, or invariants it rests on.
 
-- **No fact without a command.** If you cannot name the command that proves it
-  and the line it printed, it is a belief. Write it under Unknowns instead.
-- **No blast-radius list without the command that produced it.** A list of
-  what came to mind is not an enumeration.
-- **No invariant that cannot be false.** "The code stays clean" is a mood.
-  "Exactly one refund row exists per charge and reason" is an invariant,
-  because one row falsifies it.
-- **No plan step that cites nothing.** Every edit points at the evidence it
-  rests on. Steps that cite nothing are where the invented behavior lives.
+`Tree:` records the tree the hunter inspected. It must be a 40-character SHA-1
+digest. The validator checks the shape, not later freshness: folding findings
+into the record does not trigger another hunt.
 
 ## Workflow
 
-### Phase 1 — Facts, each with its command
+1. **Write the record.** Run each fact command, mechanically enumerate the
+   blast radius, name falsifiable invariants, and resolve decision-blocking
+   unknowns.
+2. **Validate before the hunt.** Run:
 
-Write the claim, then run the command, then paste the line it printed. In that
-order. A fact written from memory of a file read earlier is exactly the failure
-this skill exists to catch — the file moved, the branch changed, or the read was
-of a different overload.
+   ```bash
+   python3 skills/groundwork/scripts/validate_record.py \
+     .groundwork/<branch>.md --pre-hunt
+   ```
 
-Issue the commands together in one message; they do not depend on each other.
+3. **Run exactly one fresh-agent hunt.** Use `/groundwork-hunt <record>`. The
+   hunter follows `references/hunt.md`, uses all six absence classes as search
+   lenses, and freezes its result at `.groundwork/hunt.md`.
+4. **Fold material findings once.** Add or correct the rows that materially
+   change the code/configuration, tests, plan/blast radius, or a
+   decision-blocking unknown. Record the hunt as:
 
-```bash
-rg -n "refundCharge" src/          # where the thing being changed is used
-git log --oneline -5 -- src/billing/refund.ts   # what changed here recently
-sed -n '30,60p' src/billing/refund.ts           # the actual current body
-```
+   ```markdown
+   - H1 — hunt — complete — 2
+   ```
 
-When a command prints nothing, that is a fact too: `→ no output` is evidence of
-absence, and is often the most load-bearing row in the record.
+   The final number is the accepted material-finding count. It may be zero.
+   Do not run a confirmation hunt, closing hunt, clearance round, or second
+   hunt after changing the record.
+5. **Validate, then implement.** Run the validator without `--pre-hunt`. A
+   valid record with exactly one completed hunt opens the production-edit
+   gate.
 
-### Phase 2 — Blast radius, enumerated mechanically
+## The six search lenses
 
-List everything that reads or writes what this change touches, and give each
-row a verdict: **SAFE** (survives unchanged), **UPDATE** (this change must edit
-it too), **UNKNOWN** (carried into Unknowns).
+The hunter checks all six. They are lenses, not quotas; zero findings is a
+valid result.
 
-Grep for the symbol first, then for the ways a symbol is reached without being
-named: string keys, routes, database columns, serialized payloads, generated
-code, dependency injection, test doubles, and anything in another repository.
-`references/second-paths.md` lists the shapes, per language, that a
-symbol-name grep does not find.
+1. **Unverified claim** — a fact's command does not prove its claim or proves
+   it in another file, branch, overload, or environment.
+2. **Second path** — a reader or writer reached by the change is absent from
+   the blast radius.
+3. **Verdict without evidence** — a SAFE row rests on assertion rather than a
+   read of the site.
+4. **Invariant already false** — a real row, request, configuration, or state
+   already falsifies the claim.
+5. **Invariant nothing enforces** — no index, type, guard, test, or runtime
+   mechanism makes the invariant true.
+6. **Unnamed unknown** — the record treats as settled something the repository
+   does not decide, such as deploy order, configuration, races, or another
+   service's behavior.
 
-Name the command above the list. A blast radius with no command above it is a
-guess with a bullet point in front of it.
+## Materiality
 
-### Phase 3 — Invariants
+A hunter finding is valid only when resolving it changes at least one of:
 
-What must still be true after the change. For each one, write the
-counterexample that would falsify it — not a restatement of the claim. Then
-ask the question that turns an invariant into a finding: **what enforces this
-today?** A unique index, a type, a guard, a test. If the answer is "nothing",
-the invariant is already at risk and the plan has to say so.
+- production code or configuration;
+- test behavior or coverage needed for the change;
+- the implementation plan or blast radius;
+- a decision-blocking unknown that must be answered before coding.
 
-### Phase 4 — Plan, and Phase 5 — Unknowns
+Accepted examples:
 
-The plan is the edits in order, each citing its evidence. Unknowns are what
-you could not settle, each with what would settle it. Writing `none` under
-Unknowns is allowed, and is a claim like any other: read the blast radius once
-more before you make it.
+- A scheduled worker calls the changed function but is absent from the blast
+  radius, so its code or tests must change.
+- A claimed uniqueness invariant has no index or guard, so the plan must add
+  an enforcement mechanism.
+- Production ordering is not represented in the repository and determines
+  whether the migration is safe, so coding must wait for an answer.
 
-### Phase 6 — Validate
+Reject these and record a short reason in the frozen hunt result:
 
-```bash
-python3 skills/groundwork/scripts/validate_record.py .groundwork/<branch>.md
-```
+- citation or line-number precision when the underlying claim remains true;
+- a verification command that could be phrased more precisely but still
+  verifies the claim;
+- requests to inventory unrelated documentation;
+- stylistic improvements;
+- concerns already covered by an invariant or required test;
+- speculative surfaces without evidence the proposed change reaches them.
 
-This is mechanical only: it checks that facts carry commands, rows carry
-verdicts, invariants carry counterexamples, and plan steps cite evidence. It
-cannot tell whether any of it is true. Fix every violation before the hunt —
-a hunter should spend its attention on what is missing, not on formatting.
+Examples: reject “use `rg --no-heading` for a cleaner citation” because it
+does not change the plan; reject “inventory every README” when no executable
+documentation reaches the change; reject a possible mobile client when the
+repository evidence shows the changed API is server-internal.
 
-### Phase 7 — Review rounds
-
-Hand the record to a **fresh agent with no memory of writing it** using the
-fixed `/groundwork-hunt` handoff. The caller supplies the record path, round
-number, round kind, and for later rounds the previous frozen findings file.
-The hunter never chooses its kind and never receives the author's reply or
-reasoning. Its instructions are in `references/hunt.md`.
-
-There are two kinds:
-
-- **Hunt:** run the full six-class method over the whole record. Round 1 is a
-  hunt. The closing round is also a hunt, so a clean confirmation still needs
-  one final full pass. At most three hunts are allowed. If the third hunt has
-  open absences, stop and report that the record is not clean, naming their
-  stable ids. Do not run a fourth hunt.
-- **Confirmation:** check only rows added or changed since the previous round
-  and the earlier absences those rows claim to close. Return `widened` when
-  closure cannot be decided without reading beyond that slice; the caller
-  reissues the next round as a hunt. Confirmations do not consume the
-  three-hunt budget.
-
-Before handoff, exclude `.groundwork/hunt.lock` and `.groundwork/hunts/` in
-`.git/info/exclude`, refresh `Tree:`, and validate. The hunter takes the lock
-with `hunt_lock.py acquire`, writes its result once to
-`.groundwork/hunts/<round>.md`, and releases the lock on every exit path. An
-existing lock younger than two hours means another round is active. An older
-lock is a dead round: report it and stop; never silently take it over.
-
-Six classes of absence, and nothing else:
-
-| | What the hunter looks for |
-|---|---|
-| **1. Unverified claim** | A fact whose command does not actually prove it, or proves it somewhere else — a different file, branch, overload or environment. |
-| **2. Second path** | Something that reads or writes the changed thing and is not in the blast radius. Re-run the enumeration with a wider net. |
-| **3. Verdict without evidence** | A SAFE row whose reason is an assertion rather than a read. SAFE means someone opened the file. |
-| **4. Invariant already false** | The record says this holds today. Find the row, request or state where it does not. |
-| **5. Invariant nothing enforces** | Nothing in the repo makes it true, so the plan cannot preserve it — it can only hope. |
-| **6. Unnamed unknown** | The record treats as settled something the repo does not decide: config, environment, ordering, a race, another service. |
-
-Out of scope for the hunt, permanently: the design, the naming, the file
-layout, whether the plan is elegant, whether a different approach would be
-better, and any suggestion that starts with "consider". Those are opinions
-about a plan. This is a check for holes in a record.
-
-**Zero absences is a valid result**, and on a small change it is the common
-one. A hunter that pads its report to look useful trains you to stop reading
-it, at which point the real findings are worthless too.
-
-Append the round to `## Hunts` as:
-
-```markdown
-- H1 — hunt — gaps — 2
-- H2 — confirmation — widened — 1
-```
-
-Never overwrite a prior row or frozen findings file. More than three hunt rows
-or more than one `complete` verdict fails validation.
-
-### Phase 8 — Fold the answers in, then write the code
-
-Every absence the review returns goes back into the record as a row: a new fact,
-a new blast-radius entry, a corrected verdict, a new unknown. Re-run the
-validator, run confirmations for the changed slice, and finish with a hunt.
-Then implement.
-
-## While you are coding
-
-The record is not a document you wrote and left behind. It is the thing you
-are now checking reality against.
-
-- **A fact turns out to be false → stop.** Do not patch around it. Amend the
-  row, then look at every plan step that cited it. This is the payoff: the
-  wrong belief is now named, so its consequences are traceable.
-- **A new caller appears → add the row with a verdict.** An unlisted caller
-  found while coding is a miss in the enumeration; widen the grep that missed
-  it rather than adding the one row.
-- **An invariant needs an exception → it was not an invariant.** Rewrite it,
-  or write down which caller is the exception and why.
-
-At the end, the record is the description of what you actually did, and the
-diff between its first and last version is a list of what you believed wrongly.
-That list is worth reading before the next change of the same shape.
+The goal is not a perfect document. It is the smallest record that makes
+implementation safe.
 
 ## The hook
 
-`hooks/require_record.py` is a PreToolUse hook that checks the record before an
-Edit or Write to production code. It is deliberately timid:
+`hooks/require_record.py` is a fail-open PreToolUse hook for Edit, Write,
+MultiEdit, and NotebookEdit:
 
-- It is inert until a project has a `.groundwork/` directory. Opting in is
-  making that directory.
-- It never guards tests, markdown, dotfiles, or the record itself.
-- Default mode is `warn`: the edit proceeds, the agent is told what the record
-  is missing. `GROUNDWORK_MODE=block` denies instead; `off` disables it.
-- If anything about the hook fails — missing validator, unreadable payload —
-  it allows the edit. A broken guard must not become a broken editor.
-- While a fresh `.groundwork/hunt.lock` exists, every Edit or Write into the
-  project is denied in block mode and warned in warn mode, including normally
-  exempt tests, fixtures and markdown. Locks older than two hours do not block;
-  the next hunter reports them as dead rounds.
+- It is inert until the target worktree has a `.groundwork/` directory.
+- It resolves the Git worktree from the target file, not an unrelated session
+  cwd.
+- Tests, markdown, dotfiles, and the record are normally exempt.
+- A live hunt lock freezes every write while the one hunter reads.
+- `warn` (default) allows and explains; `block` denies; `off` disables.
+- Before guarded production edits, the record must be structurally valid and
+  contain exactly one `H1 — hunt — complete — N` row.
+- Missing validator, unreadable payload, or other hook failures allow the edit.
 
-## Cost
+Repository-specific watched paths, thresholds, and exemptions belong to the
+consuming repository, not this plugin.
 
-A record for a real change is 15 to 30 rows and a handful of greps. The hunt
-is one agent call over a file plus the repo. Against that: a wrong claim about
-the repo, discovered after the push, costs a review round trip, a fix commit,
-and a re-run of whatever gate the push turned red.
-
-If a change is small enough that this trade looks bad, it is small enough to
-skip the record. Say so and move on.
+Once implementation begins, Groundwork is finished. New code is reviewed by
+Shrike, Bugbot, tests, or equivalent downstream tools; do not reopen the
+Groundwork hunt.
 
 ---
 
@@ -254,136 +165,127 @@ this build targets agents that load their whole instruction set up front.
 
 <!-- from references/hunt.md -->
 
-## The hunt
+## The one hunt
 
-Instructions for the second agent. You did not write this record. That is the
-only reason your read is worth anything, so do not reconstruct the reasoning
-behind it — check it against the repository.
+> **Groundwork runs once before implementation. Shrike, Bugbot, or equivalent tools review the resulting code later.**
 
-The caller supplies the record, consecutive round number, and kind. Never pick
-the kind yourself. A later round also receives the previous frozen findings at
-`.groundwork/hunts/<n-1>.md`; never accept the author's reply or reasoning as
-evidence.
+You are the one fresh hunter. You did not write the record. Check it against
+the repository exactly once, freeze the result, and stop. There are no
+confirmation hunts, closing hunts, retries, or clearance rounds.
 
-### Round kinds
-
-**Hunt** means the full method below over the whole record. Round 1 and the
-closing round are hunts. No chain may exceed three hunts. If the third still
-has open absences, return them by id and say the record is not clean.
-
-**Confirmation** means read the previous findings, diff the record against the
-version described there, and check only the rows added or changed plus the
-absences those rows claim to close. Do not re-run unrelated facts or re-open
-unchanged SAFE rows. If closure depends on a wider caller, invariant, or
-surface, return `widened`; the caller starts the next round as a hunt.
-
-An absence already closed with repository evidence is not re-reported.
-Re-deriving a fact the previous round confirmed is waste, not thoroughness.
-
-### Freeze the round
+### Freeze the review
 
 Acquire the project lock before reading:
 
 ```bash
-python3 skills/groundwork/scripts/hunt_lock.py acquire <project> <round> <kind>
+python3 skills/groundwork/scripts/hunt_lock.py acquire <project>
 ```
 
-A fresh existing lock means another round owns the project. A lock older than
-two hours is a dead round: report its contents and stop. Never remove or replace
-it silently. Validate `Tree:` after acquiring the lock and again before
-freezing the result. Release only your own round's lock on every exit path:
+A fresh existing lock means the one hunt is already active. A lock older than
+two hours is a dead hunt: report its contents and stop. Never replace it
+silently. Validate the record structure after acquiring the lock:
 
 ```bash
-python3 skills/groundwork/scripts/hunt_lock.py release <project> <round>
+python3 skills/groundwork/scripts/validate_record.py <record> --pre-hunt
 ```
 
-### What you are looking for
+Release the lock on every exit path:
 
-**Absences.** Rows that should be in the record and are not, and rows that are
-in it without the evidence they claim. You are not reviewing the plan. You are
-not reviewing the design. You are checking a finite list for missing entries.
+```bash
+python3 skills/groundwork/scripts/hunt_lock.py release <project>
+```
 
-Six classes, and nothing outside them:
+### Six absence classes
 
-1. **Unverified claim.** A fact whose command does not prove it, or proves it
-   somewhere else: another file, another branch, another overload, another
-   environment, a stale line number, a command whose output was paraphrased
-   into something stronger than it said.
-2. **Second path.** Something that reads or writes the changed thing and is not
-   in the blast radius. This is the highest-yield class. See
-   `second-paths.md` for the shapes a symbol grep does not find.
-3. **Verdict without evidence.** A `SAFE` row whose reason is an assertion
-   rather than a read — "unrelated", "internal only", "not affected". Open the
-   file and decide for yourself.
-4. **Invariant already false.** The record claims this holds today. Find the
-   row, request, config or state where it does not.
-5. **Invariant nothing enforces.** Nothing in the repo makes it true. The plan
-   cannot preserve what nothing holds up, so the record needs to say what will
-   enforce it after the change.
-6. **Unnamed unknown.** The record treats as settled something the repo does
-   not decide: an environment variable, a deploy order, a concurrent writer,
-   another service's retry policy, a value that differs between local and
-   production.
+Use every class as a search lens, not a quota. Report zero findings when zero
+material absences survive.
+
+1. **Unverified claim.** Re-run each fact command. Report a claim only when the
+   command does not prove it or proves another file, branch, overload, or
+   environment.
+2. **Second path.** Re-run the enumeration with a wider net using
+   `second-paths.md`. Report a reader or writer the record omitted.
+3. **Verdict without evidence.** Open every SAFE row. Report it only when the
+   stated reason is not supported by the site.
+4. **Invariant already false.** Try to falsify each invariant with a real row,
+   request, configuration, or code path.
+5. **Invariant nothing enforces.** Identify the index, type, guard, test, or
+   runtime mechanism that holds each invariant up.
+6. **Unnamed unknown.** Find assumptions the repository cannot settle, such as
+   environment, ordering, concurrency, or another service's behavior.
+
+### Materiality gate
+
+A candidate is a finding only if resolving it changes at least one of:
+
+- production code or configuration;
+- test behavior or coverage needed for the change;
+- the implementation plan or blast radius;
+- a decision-blocking unknown that must be answered before coding.
+
+Accepted examples:
+
+- A cron worker reaches the changed code but is absent from the blast radius.
+- The invariant needs a unique index that the plan does not include.
+- Safe deployment depends on an external ordering guarantee that must be
+  answered before coding.
+
+Reject the following, and record a short reason:
+
+- citation or line-number nitpicks when the claim remains true;
+- commands that could be more precise but already verify the claim;
+- requests to inventory unrelated documentation;
+- stylistic improvements;
+- duplicate concerns already covered by an invariant or test;
+- speculative surfaces without evidence the change reaches them.
+
+For example, “the fact should quote line 42 instead of line 41” is rejected if
+the command still proves the claim. “Search every README” is rejected unless an
+executed snippet reaches the changed behavior. “A mobile app might call this”
+is rejected without evidence that the changed contract is exposed to it.
+
+The goal is the smallest record that makes implementation safe, not a perfect
+document.
 
 ### Method
 
-1. **Run the validator first.** `validate_record.py <record>`. Mechanical
-   violations are not your findings; if there are any, say so and stop — the
-   record is not ready to be hunted.
-2. **Re-run every command in the Facts section.** Do not read the evidence
-   column and believe it. Run the command. Independent commands go out
-   together in one message.
-3. **Re-run the enumeration wider than the record ran it.** Drop the path
-   filter, drop the parentheses, search the string form of the name, search
-   the schema, search sibling repositories if they are checked out. Diff your
-   hit list against the blast radius rows.
-4. **Open every SAFE row.** A SAFE verdict is a claim that someone read the
-   call site. Read it.
-5. **Try to falsify each invariant** with a real row, request or code path
-   before asking what enforces it.
-6. **Report only what survives.** If you cannot point at a file, a line, or a
-   command's output, you have a feeling, not a finding. Delete it.
-
-Steps 2 through 5 apply in full to a hunt. In a confirmation, apply them only
-to the changed-row and prior-absence slice described above.
+1. Run the pre-hunt validator. Mechanical violations are not findings; report
+   them, release the lock, and stop.
+2. Re-run every fact command.
+3. Widen the blast-radius enumeration and compare real hits with the rows.
+4. Open every SAFE site.
+5. Try to falsify every invariant and identify its enforcement.
+6. Apply the materiality gate to every candidate.
+7. Write the result once to `.groundwork/hunt.md`, make it read-only, release
+   the lock, and stop. Do not recommend another hunt.
 
 ### Output
 
-At most seven absences, ordered by what would cost the most to discover after
-the code is written. One block each:
+Report at most seven accepted material findings, ordered by the cost of finding
+them after implementation. Use stable ids:
 
+```text
+[A1] Second path — src/jobs/reconcile.ts:52 reaches refundCharge but is absent
+    Found by: rg -n "refundCharge" --glob '!tests/**' → 7 hits; record has 6
+    Why it is material: this worker also needs the new key and test coverage
+    Add to the record: a B row and a plan step
 ```
-[A2] Second path — src/jobs/reconcile.ts:52 calls refundCharge and is not in the blast radius
-    Found by: rg -n "refundCharge" --glob '!tests/**' → 7 hits; the record's list has 6
-    Why it matters: it replays yesterday's charges, so the new event-id key is absent there
-    Add to the record: a B row with a verdict, or a U row if the verdict needs a read
+
+Then list rejected candidates with a short reason, followed by coverage of all
+six lenses: commands re-run, SAFE rows opened, invariants tested, and anything
+that could not be checked.
+
+The frozen file must include the record path, `complete` verdict, tree digest,
+record hash, accepted count, accepted findings, rejected candidates, and
+coverage. It is evidence that the one hunt occurred. The implementing agent
+then folds accepted findings into the record once and adds:
+
+```markdown
+- H1 — hunt — complete — <accepted material finding count>
 ```
 
-Then one line of coverage: which commands you re-ran, which you could not, and
-what you did not check.
-
-Write the full result once to `.groundwork/hunts/<round>.md` with noclobber (or
-an equivalent exclusive create), then make it read-only. Include record path,
-round, kind, verdict, tree digest, a hash and exact copy of every reviewed row,
-every open/closed absence id, and coverage. That row snapshot is what lets a
-confirmation identify the record delta without seeing the author's reasoning.
-Never overwrite an earlier round. A later reviewer trusts the frozen evidence,
-not a paraphrase in the author's conversation.
-
-**Zero absences is a valid and common result.** Say it plainly, name the three
-to five things you specifically checked and found present, and stop. Padding a
-report to look useful is how a reviewer gets ignored — and once it is ignored,
-its real findings are worth nothing either.
-
-### Out of scope, permanently
-
-The design. The naming. The file layout. Whether the plan is elegant or
-whether another approach would be better. Test-coverage opinions. Anything
-phrased as "consider". Style of the record itself. Rewriting rows you could
-have read.
-
-If a finding cannot be phrased as *"the record does not contain X, and here is
-the command that shows X exists"*, it is not a finding.
+Changes made while folding findings do not invalidate the hunt and do not
+authorize another one.
 
 <!-- from references/record-format.md -->
 
@@ -394,8 +296,9 @@ Invariants, Plan, Unknowns, Hunts. Every row is a top-level list item whose fiel
 separated by an em dash (`—`) or a double hyphen (`--`), starting with an id.
 
 Immediately below the title, `Tree:` holds the first field printed by
-`git status --porcelain | shasum`. Refresh it immediately before each round.
-Validation fails as soon as the working tree no longer has that digest.
+`git status --porcelain | shasum`. Refresh it immediately before the one hunt.
+It records what the hunter inspected. Later edits that fold material findings
+into the record do not invalidate the hunt or require another one.
 
 Indented bullets under a row are notes. The validator ignores them, so use them
 freely for the detail that does not fit on the line.
@@ -491,13 +394,19 @@ comes from.
 `none` as the whole section only when the blast radius has no `UNKNOWN` row and
 you have read it twice.
 
-### Hunts — `H1 — hunt — gaps — 2`
+### Hunts — `H1 — hunt — complete — 2`
 
-Append one row after each round. Fields are the consecutive round number, kind
-(`hunt` or `confirmation`), verdict (`gaps`, `complete`, or `widened`), and
-absence count. Never rewrite an earlier row. More than three `hunt` rows or
-more than one `complete` verdict invalidates the record; confirmations do not
-consume the three-hunt budget.
+Before the hunt, write `none` and validate with `--pre-hunt`. After the fresh
+agent finishes, fold accepted material findings into the record once and
+replace `none` with exactly one row. The final field is the number of accepted
+material findings, including zero. The only valid form is:
+
+```markdown
+- H1 — hunt — complete — <accepted material finding count>
+```
+
+A second row is invalid. Editing the record after H1 does not require or permit
+another hunt.
 
 ### The rule table
 
@@ -521,14 +430,13 @@ consume the three-hunt budget.
 | GW014 | a row refers to an id that does not exist |
 | GW015 | template placeholder text was left in |
 | GW016 | an unknown names no way to resolve it |
-| GW017 | Tree is missing, malformed, or no longer matches the working tree |
-| GW018 | a hunt row is malformed or rounds are not consecutive |
-| GW019 | the record contains more than three full hunts |
-| GW020 | more than one hunt row claims completeness |
+| GW017 | Tree is missing or malformed |
+| GW018 | exactly one completed hunt is required before implementation |
+| GW019 | more than one hunt is recorded |
 
 What the validator cannot check: whether a command proves its claim, whether
 the enumeration was wide enough, whether a SAFE verdict was read or assumed.
-That is the hunt, and the hunt is a second agent — see `hunt.md`.
+That is the one hunt, performed by one fresh agent — see `hunt.md`.
 
 <!-- from references/second-paths.md -->
 
@@ -619,7 +527,7 @@ made by accident.
 ```markdown
 # groundwork — <what this change is called>
 
-Tree: <run `git status --porcelain | shasum` and paste its first field>
+Tree: <run `git status --porcelain | shasum` immediately before the one hunt and paste its first field>
 
 Copy this to `.groundwork/<branch>.md` and replace every angle-bracket
 placeholder. The validator fails while any placeholder survives, on purpose:
@@ -671,8 +579,9 @@ nothing left — but read the blast radius again first.
 
 ## Hunts
 
-Append one row after every frozen round. The final field is the number of
-absences that round returned.
+Before the hunt, leave this as `none` and validate with `--pre-hunt`. After the
+one hunt, fold accepted material findings into the record once and replace
+`none` with H1. The final field is the accepted material-finding count.
 
-- H1 — hunt — <gaps or complete> — <absence count>
+none
 ```

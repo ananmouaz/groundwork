@@ -5,8 +5,9 @@ Invariants, Plan, Unknowns, Hunts. Every row is a top-level list item whose fiel
 separated by an em dash (`—`) or a double hyphen (`--`), starting with an id.
 
 Immediately below the title, `Tree:` holds the first field printed by
-`git status --porcelain | shasum`. Refresh it immediately before each round.
-Validation fails as soon as the working tree no longer has that digest.
+`git status --porcelain | shasum`. Refresh it immediately before the one hunt.
+It records what the hunter inspected. Later edits that fold material findings
+into the record do not invalidate the hunt or require another one.
 
 Indented bullets under a row are notes. The validator ignores them, so use them
 freely for the detail that does not fit on the line.
@@ -102,13 +103,19 @@ comes from.
 `none` as the whole section only when the blast radius has no `UNKNOWN` row and
 you have read it twice.
 
-## Hunts — `H1 — hunt — gaps — 2`
+## Hunts — `H1 — hunt — complete — 2`
 
-Append one row after each round. Fields are the consecutive round number, kind
-(`hunt` or `confirmation`), verdict (`gaps`, `complete`, or `widened`), and
-absence count. Never rewrite an earlier row. More than three `hunt` rows or
-more than one `complete` verdict invalidates the record; confirmations do not
-consume the three-hunt budget.
+Before the hunt, write `none` and validate with `--pre-hunt`. After the fresh
+agent finishes, fold accepted material findings into the record once and
+replace `none` with exactly one row. The final field is the number of accepted
+material findings, including zero. The only valid form is:
+
+```markdown
+- H1 — hunt — complete — <accepted material finding count>
+```
+
+A second row is invalid. Editing the record after H1 does not require or permit
+another hunt.
 
 ## The rule table
 
@@ -132,11 +139,10 @@ consume the three-hunt budget.
 | GW014 | a row refers to an id that does not exist |
 | GW015 | template placeholder text was left in |
 | GW016 | an unknown names no way to resolve it |
-| GW017 | Tree is missing, malformed, or no longer matches the working tree |
-| GW018 | a hunt row is malformed or rounds are not consecutive |
-| GW019 | the record contains more than three full hunts |
-| GW020 | more than one hunt row claims completeness |
+| GW017 | Tree is missing or malformed |
+| GW018 | exactly one completed hunt is required before implementation |
+| GW019 | more than one hunt is recorded |
 
 What the validator cannot check: whether a command proves its claim, whether
 the enumeration was wide enough, whether a SAFE verdict was read or assumed.
-That is the hunt, and the hunt is a second agent — see `hunt.md`.
+That is the one hunt, performed by one fresh agent — see `hunt.md`.

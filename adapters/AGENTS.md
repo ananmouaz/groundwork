@@ -14,6 +14,9 @@ plus the non-negotiables. The full method belongs in the file it points at.
 For any non-trivial change — a shared function, a schema, a public contract,
 money, auth, or anything with more than one caller:
 
+**Groundwork runs once before implementation. Shrike, Bugbot, or equivalent
+tools review the resulting code later.**
+
 **Read `.agents/groundwork.prompt.md` and follow it before editing production
 code.** Write the record first. Do not start with the edit and document it
 afterwards; a record written after the code is a summary, and a summary cannot
@@ -33,5 +36,7 @@ Non-negotiables, restated here so they survive even if the file is not read:
 - **A fact that turns out false while coding stops the work.** Amend the row,
   then revisit every step that cited it.
 
-Validate the record with `validate_record.py`, then have a *fresh* agent hunt
-it for absences before you implement.
+Validate the draft with `validate_record.py --pre-hunt`, then have exactly one
+*fresh* agent hunt it for material absences. Fold accepted findings into the
+record once, add `H1 — hunt — complete — N`, validate without `--pre-hunt`, and
+implement. Do not run a confirmation, closing, or second Groundwork hunt.

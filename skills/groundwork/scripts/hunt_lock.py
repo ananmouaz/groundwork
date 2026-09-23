@@ -19,7 +19,7 @@ def age(path, now=None):
     return int(now if now is not None else time.time()) - int(os.stat(path).st_mtime)
 
 
-def acquire(project, round_number, kind, now=None):
+def acquire(project, now=None):
     path = lock_path(project)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     try:
@@ -30,8 +30,8 @@ def acquire(project, round_number, kind, now=None):
             detail = handle.read().strip() or "empty lock"
         if lock_age > MAX_AGE:
             sys.stderr.write(
-                "groundwork: dead round left %s (%ds old): %s\n"
-                "record the dead round, remove the lock explicitly, then retry; "
+                "groundwork: dead hunt left %s (%ds old): %s\n"
+                "record the interrupted hunt, remove the lock explicitly, then retry; "
                 "it was not taken over\n" % (path, lock_age, detail))
             return 3
         sys.stderr.write("groundwork: another hunt holds %s: %s\n" % (path, detail))
@@ -44,8 +44,7 @@ def acquire(project, round_number, kind, now=None):
         except (OSError, subprocess.CalledProcessError):
             head = "unknown"
         started = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        content = "head=%s round=%s kind=%s started=%s\n" % (
-            head, round_number, kind, started)
+        content = "head=%s started=%s\n" % (head, started)
         os.write(descriptor, content.encode("utf-8"))
     finally:
         os.close(descriptor)
@@ -53,16 +52,10 @@ def acquire(project, round_number, kind, now=None):
     return 0
 
 
-def release(project, round_number):
+def release(project):
     path = lock_path(project)
-    try:
-        with open(path) as handle:
-            detail = handle.read()
-    except IOError:
+    if not os.path.isfile(path):
         sys.stderr.write("groundwork: no hunt lock at %s\n" % path)
-        return 1
-    if "round=%s " % round_number not in detail:
-        sys.stderr.write("groundwork: lock belongs to another round: %s" % detail)
         return 1
     os.unlink(path)
     return 0
@@ -73,17 +66,14 @@ def main(argv):
     subparsers = parser.add_subparsers(dest="command")
     take = subparsers.add_parser("acquire")
     take.add_argument("project")
-    take.add_argument("round", type=int)
-    take.add_argument("kind", choices=("hunt", "confirmation"))
     drop = subparsers.add_parser("release")
     drop.add_argument("project")
-    drop.add_argument("round", type=int)
     args = parser.parse_args(argv)
     if args.command is None:
         parser.error("choose acquire or release")
     if args.command == "acquire":
-        return acquire(args.project, args.round, args.kind)
-    return release(args.project, args.round)
+        return acquire(args.project)
+    return release(args.project)
 
 
 if __name__ == "__main__":

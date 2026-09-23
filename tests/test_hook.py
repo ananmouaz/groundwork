@@ -55,13 +55,16 @@ class HookProject(unittest.TestCase):
     def setUp(self):
         self.project = tempfile.mkdtemp(prefix="groundwork-test-")
         os.makedirs(os.path.join(self.project, "src", "billing"))
+        with open(os.path.join(self.project, "src", "billing", "refund.ts"), "w") as handle:
+            handle.write("export function refund() {}\n")
         with open(os.path.join(self.project, ".gitignore"), "w") as handle:
             handle.write(".groundwork/\n")
         subprocess.check_call(["git", "init", "-q"], cwd=self.project)
         subprocess.check_call(["git", "config", "user.email", "test@example.com"],
                               cwd=self.project)
         subprocess.check_call(["git", "config", "user.name", "Test"], cwd=self.project)
-        subprocess.check_call(["git", "add", ".gitignore"], cwd=self.project)
+        subprocess.check_call(["git", "add", ".gitignore", "src/billing/refund.ts"],
+                              cwd=self.project)
         subprocess.check_call(["git", "commit", "-qm", "base"], cwd=self.project)
 
     def tearDown(self):
@@ -126,6 +129,24 @@ class RecordPresent(HookProject):
         self.assertIn("GW013", reason)
         self.assertIn("record.md", reason)
 
+    def test_zero_hunts_is_denied_in_block_mode(self):
+        self.opt_in(self.clean_record().replace(
+            "- H1 — hunt — complete — 0", "none"))
+        _, out, _ = run_hook(self.project, env={"GROUNDWORK_MODE": "block"})
+        decision, reason = decision_of(out)
+        self.assertEqual(decision, "deny")
+        self.assertIn("GW018", reason)
+
+    def test_editing_the_record_after_the_hunt_does_not_require_another_hunt(self):
+        self.opt_in(self.clean_record())
+        record = os.path.join(self.project, ".groundwork", "record.md")
+        subprocess.check_call(["git", "add", "-f", record], cwd=self.project)
+        subprocess.check_call(["git", "commit", "-qm", "track groundwork"], cwd=self.project)
+        with open(record, "a") as handle:
+            handle.write("\nFolded one material finding into P2.\n")
+        code, out, _ = run_hook(self.project, env={"GROUNDWORK_MODE": "block"})
+        self.assertEqual((code, out), (0, ""))
+
     def test_a_long_violation_list_is_truncated(self):
         # An empty record misses every section. The agent gets five lines
         # and a count, not a wall.
@@ -160,7 +181,7 @@ class HuntLock(HookProject):
         self.opt_in(self.clean_record())
         path = os.path.join(self.project, ".groundwork", "hunt.lock")
         with open(path, "w") as handle:
-            handle.write("round=2 kind=confirmation\n")
+            handle.write("head=test started=now\n")
         return path
 
     def test_fresh_lock_denies_even_an_exempt_write_in_block_mode(self):
@@ -223,6 +244,31 @@ class ExemptPaths(HookProject):
                              env={"GROUNDWORK_MODE": "block",
                                   "GROUNDWORK_EXEMPT": "src/generated/"})
         self.assertEqual(decision_of(out)[0], "allow")
+
+
+class TargetWorktree(HookProject):
+    def test_absolute_target_uses_its_own_worktree_not_payload_cwd(self):
+        self.opt_in(self.clean_record())
+        linked = self.project + "-linked"
+        subprocess.check_call(
+            ["git", "worktree", "add", "-q", "-b", "linked-test", linked],
+            cwd=self.project)
+        try:
+            os.makedirs(os.path.join(linked, ".groundwork"))
+            with open(os.path.join(linked, ".groundwork", "record.md"), "w") as handle:
+                handle.write(self.clean_record().replace(
+                    "- H1 — hunt — complete — 0", "none"))
+            _, out, _ = run_hook(
+                self.project,
+                path=os.path.join(linked, "src", "billing", "refund.ts"),
+                env={"GROUNDWORK_MODE": "block"})
+            decision, reason = decision_of(out)
+            self.assertEqual(decision, "deny")
+            self.assertIn("GW018", reason)
+        finally:
+            subprocess.call(
+                ["git", "worktree", "remove", "--force", linked], cwd=self.project)
+            shutil.rmtree(linked, ignore_errors=True)
 
 
 class FailsOpen(HookProject):
