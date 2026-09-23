@@ -44,7 +44,7 @@ review it instead.
 
 ## The record
 
-One markdown file, six sections, at `.groundwork/<branch>.md`. Start from
+One markdown file, seven sections, at `.groundwork/<branch>.md`. Start from
 `templates/RECORD.template.md`. The full field spec is in
 `references/record-format.md`; read it before writing the first record.
 
@@ -55,7 +55,12 @@ One markdown file, six sections, at `.groundwork/<branch>.md`. Start from
 ## Invariants    I1..In  a claim that can be false — breaks if: counterexample
 ## Plan          P1..Pn  the edit — rests on F1, B2
 ## Unknowns      U1..Un  the open question — resolved by: what would settle it
+## Hunts         H1..Hn  kind — verdict — absence count
 ```
+
+`Tree:` below the title holds the first field from
+`git status --porcelain | shasum`. Refresh it immediately before every review
+round. The validator rejects a record as soon as the working tree moves.
 
 Four rules carry the whole method:
 
@@ -130,11 +135,33 @@ verdicts, invariants carry counterexamples, and plan steps cite evidence. It
 cannot tell whether any of it is true. Fix every violation before the hunt —
 a hunter should spend its attention on what is missing, not on formatting.
 
-### Phase 7 — The hunt
+### Phase 7 — Review rounds
 
-Hand the record to a **fresh agent with no memory of writing it**. Its
-instructions are in `references/hunt.md`, and its scope is narrow: report what
-is *absent*, never what is present.
+Hand the record to a **fresh agent with no memory of writing it** using the
+fixed `/groundwork-hunt` handoff. The caller supplies the record path, round
+number, round kind, and for later rounds the previous frozen findings file.
+The hunter never chooses its kind and never receives the author's reply or
+reasoning. Its instructions are in `references/hunt.md`.
+
+There are two kinds:
+
+- **Hunt:** run the full six-class method over the whole record. Round 1 is a
+  hunt. The closing round is also a hunt, so a clean confirmation still needs
+  one final full pass. At most three hunts are allowed. If the third hunt has
+  open absences, stop and report that the record is not clean, naming their
+  stable ids. Do not run a fourth hunt.
+- **Confirmation:** check only rows added or changed since the previous round
+  and the earlier absences those rows claim to close. Return `widened` when
+  closure cannot be decided without reading beyond that slice; the caller
+  reissues the next round as a hunt. Confirmations do not consume the
+  three-hunt budget.
+
+Before handoff, exclude `.groundwork/hunt.lock` and `.groundwork/hunts/` in
+`.git/info/exclude`, refresh `Tree:`, and validate. The hunter takes the lock
+with `hunt_lock.py acquire`, writes its result once to
+`.groundwork/hunts/<round>.md`, and releases the lock on every exit path. An
+existing lock younger than two hours means another round is active. An older
+lock is a dead round: report it and stop; never silently take it over.
 
 Six classes of absence, and nothing else:
 
@@ -156,11 +183,22 @@ about a plan. This is a check for holes in a record.
 one. A hunter that pads its report to look useful trains you to stop reading
 it, at which point the real findings are worthless too.
 
+Append the round to `## Hunts` as:
+
+```markdown
+- H1 — hunt — gaps — 2
+- H2 — confirmation — widened — 1
+```
+
+Never overwrite a prior row or frozen findings file. More than three hunt rows
+or more than one `complete` verdict fails validation.
+
 ### Phase 8 — Fold the answers in, then write the code
 
-Every absence the hunt returns goes back into the record as a row: a new fact,
+Every absence the review returns goes back into the record as a row: a new fact,
 a new blast-radius entry, a corrected verdict, a new unknown. Re-run the
-validator. Then implement.
+validator, run confirmations for the changed slice, and finish with a hunt.
+Then implement.
 
 ## While you are coding
 
@@ -192,6 +230,10 @@ Edit or Write to production code. It is deliberately timid:
   is missing. `GROUNDWORK_MODE=block` denies instead; `off` disables it.
 - If anything about the hook fails — missing validator, unreadable payload —
   it allows the edit. A broken guard must not become a broken editor.
+- While a fresh `.groundwork/hunt.lock` exists, every Edit or Write into the
+  project is denied in block mode and warned in warn mode, including normally
+  exempt tests, fixtures and markdown. Locks older than two hours do not block;
+  the next hunter reports them as dead rounds.
 
 ## Cost
 
@@ -217,6 +259,43 @@ this build targets agents that load their whole instruction set up front.
 Instructions for the second agent. You did not write this record. That is the
 only reason your read is worth anything, so do not reconstruct the reasoning
 behind it — check it against the repository.
+
+The caller supplies the record, consecutive round number, and kind. Never pick
+the kind yourself. A later round also receives the previous frozen findings at
+`.groundwork/hunts/<n-1>.md`; never accept the author's reply or reasoning as
+evidence.
+
+### Round kinds
+
+**Hunt** means the full method below over the whole record. Round 1 and the
+closing round are hunts. No chain may exceed three hunts. If the third still
+has open absences, return them by id and say the record is not clean.
+
+**Confirmation** means read the previous findings, diff the record against the
+version described there, and check only the rows added or changed plus the
+absences those rows claim to close. Do not re-run unrelated facts or re-open
+unchanged SAFE rows. If closure depends on a wider caller, invariant, or
+surface, return `widened`; the caller starts the next round as a hunt.
+
+An absence already closed with repository evidence is not re-reported.
+Re-deriving a fact the previous round confirmed is waste, not thoroughness.
+
+### Freeze the round
+
+Acquire the project lock before reading:
+
+```bash
+python3 skills/groundwork/scripts/hunt_lock.py acquire <project> <round> <kind>
+```
+
+A fresh existing lock means another round owns the project. A lock older than
+two hours is a dead round: report its contents and stop. Never remove or replace
+it silently. Validate `Tree:` after acquiring the lock and again before
+freezing the result. Release only your own round's lock on every exit path:
+
+```bash
+python3 skills/groundwork/scripts/hunt_lock.py release <project> <round>
+```
 
 ### What you are looking for
 
@@ -265,13 +344,16 @@ Six classes, and nothing outside them:
 6. **Report only what survives.** If you cannot point at a file, a line, or a
    command's output, you have a feeling, not a finding. Delete it.
 
+Steps 2 through 5 apply in full to a hunt. In a confirmation, apply them only
+to the changed-row and prior-absence slice described above.
+
 ### Output
 
 At most seven absences, ordered by what would cost the most to discover after
 the code is written. One block each:
 
 ```
-[2] Second path — src/jobs/reconcile.ts:52 calls refundCharge and is not in the blast radius
+[A2] Second path — src/jobs/reconcile.ts:52 calls refundCharge and is not in the blast radius
     Found by: rg -n "refundCharge" --glob '!tests/**' → 7 hits; the record's list has 6
     Why it matters: it replays yesterday's charges, so the new event-id key is absent there
     Add to the record: a B row with a verdict, or a U row if the verdict needs a read
@@ -279,6 +361,14 @@ the code is written. One block each:
 
 Then one line of coverage: which commands you re-ran, which you could not, and
 what you did not check.
+
+Write the full result once to `.groundwork/hunts/<round>.md` with noclobber (or
+an equivalent exclusive create), then make it read-only. Include record path,
+round, kind, verdict, tree digest, a hash and exact copy of every reviewed row,
+every open/closed absence id, and coverage. That row snapshot is what lets a
+confirmation identify the record delta without seeing the author's reasoning.
+Never overwrite an earlier round. A later reviewer trusts the frozen evidence,
+not a paraphrase in the author's conversation.
 
 **Zero absences is a valid and common result.** Say it plainly, name the three
 to five things you specifically checked and found present, and stop. Padding a
@@ -299,9 +389,13 @@ the command that shows X exists"*, it is not a finding.
 
 ## The record format
 
-One markdown file. Six sections, in this order: Task, Facts, Blast radius,
-Invariants, Plan, Unknowns. Every row is a top-level list item whose fields are
+One markdown file. Seven sections, in this order: Task, Facts, Blast radius,
+Invariants, Plan, Unknowns, Hunts. Every row is a top-level list item whose fields are
 separated by an em dash (`—`) or a double hyphen (`--`), starting with an id.
+
+Immediately below the title, `Tree:` holds the first field printed by
+`git status --porcelain | shasum`. Refresh it immediately before each round.
+Validation fails as soon as the working tree no longer has that digest.
 
 Indented bullets under a row are notes. The validator ignores them, so use them
 freely for the detail that does not fit on the line.
@@ -397,6 +491,14 @@ comes from.
 `none` as the whole section only when the blast radius has no `UNKNOWN` row and
 you have read it twice.
 
+### Hunts — `H1 — hunt — gaps — 2`
+
+Append one row after each round. Fields are the consecutive round number, kind
+(`hunt` or `confirmation`), verdict (`gaps`, `complete`, or `widened`), and
+absence count. Never rewrite an earlier row. More than three `hunt` rows or
+more than one `complete` verdict invalidates the record; confirmations do not
+consume the three-hunt budget.
+
 ### The rule table
 
 `validate_record.py --rules` prints this list.
@@ -419,6 +521,10 @@ you have read it twice.
 | GW014 | a row refers to an id that does not exist |
 | GW015 | template placeholder text was left in |
 | GW016 | an unknown names no way to resolve it |
+| GW017 | Tree is missing, malformed, or no longer matches the working tree |
+| GW018 | a hunt row is malformed or rounds are not consecutive |
+| GW019 | the record contains more than three full hunts |
+| GW020 | more than one hunt row claims completeness |
 
 What the validator cannot check: whether a command proves its claim, whether
 the enumeration was wide enough, whether a SAFE verdict was read or assumed.
@@ -513,6 +619,8 @@ made by accident.
 ```markdown
 # groundwork — <what this change is called>
 
+Tree: <run `git status --porcelain | shasum` and paste its first field>
+
 Copy this to `.groundwork/<branch>.md` and replace every angle-bracket
 placeholder. The validator fails while any placeholder survives, on purpose:
 a half-filled record is worse than none, because it looks finished.
@@ -560,4 +668,11 @@ What is still not known, and what would settle it. Write `none` if there is
 nothing left — but read the blast radius again first.
 
 - U1 — <the open question> — resolved by: <the command, file or person that answers it>
+
+## Hunts
+
+Append one row after every frozen round. The final field is the number of
+absences that round returned.
+
+- H1 — hunt — <gaps or complete> — <absence count>
 ```

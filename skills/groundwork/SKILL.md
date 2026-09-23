@@ -47,7 +47,7 @@ review it instead.
 
 ## The record
 
-One markdown file, six sections, at `.groundwork/<branch>.md`. Start from
+One markdown file, seven sections, at `.groundwork/<branch>.md`. Start from
 `templates/RECORD.template.md`. The full field spec is in
 `references/record-format.md`; read it before writing the first record.
 
@@ -58,7 +58,12 @@ One markdown file, six sections, at `.groundwork/<branch>.md`. Start from
 ## Invariants    I1..In  a claim that can be false — breaks if: counterexample
 ## Plan          P1..Pn  the edit — rests on F1, B2
 ## Unknowns      U1..Un  the open question — resolved by: what would settle it
+## Hunts         H1..Hn  kind — verdict — absence count
 ```
+
+`Tree:` below the title holds the first field from
+`git status --porcelain | shasum`. Refresh it immediately before every review
+round. The validator rejects a record as soon as the working tree moves.
 
 Four rules carry the whole method:
 
@@ -133,11 +138,33 @@ verdicts, invariants carry counterexamples, and plan steps cite evidence. It
 cannot tell whether any of it is true. Fix every violation before the hunt —
 a hunter should spend its attention on what is missing, not on formatting.
 
-### Phase 7 — The hunt
+### Phase 7 — Review rounds
 
-Hand the record to a **fresh agent with no memory of writing it**. Its
-instructions are in `references/hunt.md`, and its scope is narrow: report what
-is *absent*, never what is present.
+Hand the record to a **fresh agent with no memory of writing it** using the
+fixed `/groundwork-hunt` handoff. The caller supplies the record path, round
+number, round kind, and for later rounds the previous frozen findings file.
+The hunter never chooses its kind and never receives the author's reply or
+reasoning. Its instructions are in `references/hunt.md`.
+
+There are two kinds:
+
+- **Hunt:** run the full six-class method over the whole record. Round 1 is a
+  hunt. The closing round is also a hunt, so a clean confirmation still needs
+  one final full pass. At most three hunts are allowed. If the third hunt has
+  open absences, stop and report that the record is not clean, naming their
+  stable ids. Do not run a fourth hunt.
+- **Confirmation:** check only rows added or changed since the previous round
+  and the earlier absences those rows claim to close. Return `widened` when
+  closure cannot be decided without reading beyond that slice; the caller
+  reissues the next round as a hunt. Confirmations do not consume the
+  three-hunt budget.
+
+Before handoff, exclude `.groundwork/hunt.lock` and `.groundwork/hunts/` in
+`.git/info/exclude`, refresh `Tree:`, and validate. The hunter takes the lock
+with `hunt_lock.py acquire`, writes its result once to
+`.groundwork/hunts/<round>.md`, and releases the lock on every exit path. An
+existing lock younger than two hours means another round is active. An older
+lock is a dead round: report it and stop; never silently take it over.
 
 Six classes of absence, and nothing else:
 
@@ -159,11 +186,22 @@ about a plan. This is a check for holes in a record.
 one. A hunter that pads its report to look useful trains you to stop reading
 it, at which point the real findings are worthless too.
 
+Append the round to `## Hunts` as:
+
+```markdown
+- H1 — hunt — gaps — 2
+- H2 — confirmation — widened — 1
+```
+
+Never overwrite a prior row or frozen findings file. More than three hunt rows
+or more than one `complete` verdict fails validation.
+
 ### Phase 8 — Fold the answers in, then write the code
 
-Every absence the hunt returns goes back into the record as a row: a new fact,
+Every absence the review returns goes back into the record as a row: a new fact,
 a new blast-radius entry, a corrected verdict, a new unknown. Re-run the
-validator. Then implement.
+validator, run confirmations for the changed slice, and finish with a hunt.
+Then implement.
 
 ## While you are coding
 
@@ -195,6 +233,10 @@ Edit or Write to production code. It is deliberately timid:
   is missing. `GROUNDWORK_MODE=block` denies instead; `off` disables it.
 - If anything about the hook fails — missing validator, unreadable payload —
   it allows the edit. A broken guard must not become a broken editor.
+- While a fresh `.groundwork/hunt.lock` exists, every Edit or Write into the
+  project is denied in block mode and warned in warn mode, including normally
+  exempt tests, fixtures and markdown. Locks older than two hours do not block;
+  the next hunter reports them as dead rounds.
 
 ## Cost
 

@@ -4,6 +4,43 @@ Instructions for the second agent. You did not write this record. That is the
 only reason your read is worth anything, so do not reconstruct the reasoning
 behind it — check it against the repository.
 
+The caller supplies the record, consecutive round number, and kind. Never pick
+the kind yourself. A later round also receives the previous frozen findings at
+`.groundwork/hunts/<n-1>.md`; never accept the author's reply or reasoning as
+evidence.
+
+## Round kinds
+
+**Hunt** means the full method below over the whole record. Round 1 and the
+closing round are hunts. No chain may exceed three hunts. If the third still
+has open absences, return them by id and say the record is not clean.
+
+**Confirmation** means read the previous findings, diff the record against the
+version described there, and check only the rows added or changed plus the
+absences those rows claim to close. Do not re-run unrelated facts or re-open
+unchanged SAFE rows. If closure depends on a wider caller, invariant, or
+surface, return `widened`; the caller starts the next round as a hunt.
+
+An absence already closed with repository evidence is not re-reported.
+Re-deriving a fact the previous round confirmed is waste, not thoroughness.
+
+## Freeze the round
+
+Acquire the project lock before reading:
+
+```bash
+python3 skills/groundwork/scripts/hunt_lock.py acquire <project> <round> <kind>
+```
+
+A fresh existing lock means another round owns the project. A lock older than
+two hours is a dead round: report its contents and stop. Never remove or replace
+it silently. Validate `Tree:` after acquiring the lock and again before
+freezing the result. Release only your own round's lock on every exit path:
+
+```bash
+python3 skills/groundwork/scripts/hunt_lock.py release <project> <round>
+```
+
 ## What you are looking for
 
 **Absences.** Rows that should be in the record and are not, and rows that are
@@ -51,13 +88,16 @@ Six classes, and nothing outside them:
 6. **Report only what survives.** If you cannot point at a file, a line, or a
    command's output, you have a feeling, not a finding. Delete it.
 
+Steps 2 through 5 apply in full to a hunt. In a confirmation, apply them only
+to the changed-row and prior-absence slice described above.
+
 ## Output
 
 At most seven absences, ordered by what would cost the most to discover after
 the code is written. One block each:
 
 ```
-[2] Second path — src/jobs/reconcile.ts:52 calls refundCharge and is not in the blast radius
+[A2] Second path — src/jobs/reconcile.ts:52 calls refundCharge and is not in the blast radius
     Found by: rg -n "refundCharge" --glob '!tests/**' → 7 hits; the record's list has 6
     Why it matters: it replays yesterday's charges, so the new event-id key is absent there
     Add to the record: a B row with a verdict, or a U row if the verdict needs a read
@@ -65,6 +105,14 @@ the code is written. One block each:
 
 Then one line of coverage: which commands you re-ran, which you could not, and
 what you did not check.
+
+Write the full result once to `.groundwork/hunts/<round>.md` with noclobber (or
+an equivalent exclusive create), then make it read-only. Include record path,
+round, kind, verdict, tree digest, a hash and exact copy of every reviewed row,
+every open/closed absence id, and coverage. That row snapshot is what lets a
+confirmation identify the record delta without seeing the author's reasoning.
+Never overwrite an earlier round. A later reviewer trusts the frozen evidence,
+not a paraphrase in the author's conversation.
 
 **Zero absences is a valid and common result.** Say it plainly, name the three
 to five things you specifically checked and found present, and stop. Padding a

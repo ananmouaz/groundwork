@@ -7,10 +7,22 @@ cd "$ROOT"
 
 python3 tests/test_validate_record.py "$@"
 python3 tests/test_hook.py "$@"
+python3 tests/test_hunt_lock.py "$@"
 
-# The example in the README has to stay valid, or the README teaches a record
-# the validator rejects.
-python3 skills/groundwork/scripts/validate_record.py tests/fixtures/clean.md
+# The clean fixture is validated in a clean throwaway repository because Tree:
+# deliberately binds a record to the repository state it describes.
+FIXTURE_REPO=$(mktemp -d "${TMPDIR:-/tmp}/groundwork-fixture.XXXXXX")
+trap 'rm -rf "$FIXTURE_REPO"' EXIT
+git -C "$FIXTURE_REPO" init -q
+printf '.groundwork/\n' > "$FIXTURE_REPO/.gitignore"
+git -C "$FIXTURE_REPO" -c user.name=Test -c user.email=test@example.com \
+  add .gitignore
+git -C "$FIXTURE_REPO" -c user.name=Test -c user.email=test@example.com \
+  commit -qm base
+mkdir -p "$FIXTURE_REPO/.groundwork"
+cp tests/fixtures/clean.md "$FIXTURE_REPO/.groundwork/record.md"
+python3 skills/groundwork/scripts/validate_record.py \
+  "$FIXTURE_REPO/.groundwork/record.md"
 
 # The template has to stay invalid: a half-filled record must not pass.
 if python3 skills/groundwork/scripts/validate_record.py templates/RECORD.template.md --quiet; then

@@ -22,13 +22,14 @@ Exit codes: 0 clean, 1 violations found, 2 the record could not be read.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 
-SECTIONS = ["task", "facts", "blast radius", "invariants", "plan", "unknowns"]
+SECTIONS = ["task", "facts", "blast radius", "invariants", "plan", "unknowns", "hunts"]
 
 PREFIX_OF = {
     "facts": "F",
@@ -36,6 +37,7 @@ PREFIX_OF = {
     "invariants": "I",
     "plan": "P",
     "unknowns": "U",
+    "hunts": "H",
 }
 
 VERDICTS = ("SAFE", "UPDATE", "UNKNOWN")
@@ -54,12 +56,13 @@ HEDGE_RE = re.compile(r"\b(" + "|".join(re.escape(h) for h in HEDGES) + r")\b", 
 PLACEHOLDER_RE = re.compile(r"(\bTODO\b|\bTBD\b|\bFIXME\b|\?\?\?|<[a-z][a-z0-9 _/.-]*>)")
 ROW_RE = re.compile(r"^[-*]\s+(.*\S)\s*$")
 FIELD_RE = re.compile(r"\s+(?:—|--)\s+")
-ID_RE = re.compile(r"^([FBIPU])([0-9]{1,3})$")
+ID_RE = re.compile(r"^([FBIPUH])([0-9]{1,3})$")
 REF_RE = re.compile(r"\b([FBIU][0-9]{1,3})\b")
 CODE_RE = re.compile(r"`([^`]+)`")
 ARROW_RE = re.compile(r"(?:→|->)")
 ENUM_RE = re.compile(r"^[-*]?\s*Enumerated by:\s*(.*\S)\s*$", re.I)
 HEADING_RE = re.compile(r"^##\s+(.*\S)\s*$")
+TREE_RE = re.compile(r"^Tree:\s*([0-9a-f]{40})\s*$", re.I)
 
 RULES = [
     ("GW001", "a required section is missing"),
@@ -78,6 +81,10 @@ RULES = [
     ("GW014", "a row refers to an id that does not exist"),
     ("GW015", "template placeholder text was left in"),
     ("GW016", "an unknown names no way to resolve it"),
+    ("GW017", "Tree is missing, malformed, or no longer matches the working tree"),
+    ("GW018", "a hunt row is malformed or rounds are not consecutive"),
+    ("GW019", "the record contains more than three full hunts"),
+    ("GW020", "more than one hunt row claims completeness"),
 ]
 
 
@@ -279,6 +286,90 @@ def check_unknowns(body, violations, unknown_ids):
                 "verdict is UNKNOWN but no unknown carries %s" % ident))
 
 
+def tree_digest(project):
+    """Return the first field of `git status --porcelain | shasum`."""
+    try:
+        output = subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=project,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return hashlib.sha1(output).hexdigest()
+
+
+def check_tree(lines, violations, project):
+    found = []
+    for number, raw in enumerate(lines, start=1):
+        if raw.startswith("Tree:"):
+            found.append((number, raw))
+    if len(found) != 1:
+        line = found[0][0] if found else 1
+        violations.append(Violation(
+            line, "GW017", "", "expected exactly one 'Tree: <sha1>' line"))
+        return
+    number, raw = found[0]
+    match = TREE_RE.match(raw)
+    if not match:
+        violations.append(Violation(
+            number, "GW017", "", "Tree must hold the 40-character shasum"))
+        return
+    if project is None:
+        return
+    actual = tree_digest(project)
+    if actual is None:
+        violations.append(Violation(
+            number, "GW017", "", "could not read the current git working tree"))
+    elif match.group(1).lower() != actual:
+        violations.append(Violation(
+            number, "GW017", "",
+            "working tree moved: recorded %s, current %s" %
+            (match.group(1).lower(), actual)))
+
+
+def check_hunts(body, violations):
+    rows = rows_of(body)
+    hunts = 0
+    complete = 0
+    for expected_round, (number, text) in enumerate(rows, start=1):
+        fields = [field.strip() for field in FIELD_RE.split(text)]
+        ident = row_id(number, fields, "H", violations)
+        if ident is None:
+            continue
+        valid = (len(fields) == 4 and
+                 fields[1] in ("hunt", "confirmation") and
+                 fields[2] in ("gaps", "complete", "widened") and
+                 re.match(r"^[0-9]+$", fields[3]))
+        if not valid or ident != "H%d" % expected_round:
+            violations.append(Violation(
+                number, "GW018", ident,
+                "use '- HN — hunt|confirmation — gaps|complete|widened — <absence count>' "
+                "with consecutive rounds"))
+            continue
+        if expected_round == 1 and fields[1] != "hunt":
+            violations.append(Violation(
+                number, "GW018", ident, "round 1 must be a full hunt"))
+        if fields[2] == "complete" and fields[1] != "hunt":
+            violations.append(Violation(
+                number, "GW018", ident, "the closing complete round must be a hunt"))
+        if fields[2] == "complete" and (fields[3] != "0" or expected_round != len(rows)):
+            violations.append(Violation(
+                number, "GW018", ident,
+                "complete must be the final row and carry zero absences"))
+        if fields[1] == "hunt":
+            hunts += 1
+        if fields[2] == "complete":
+            complete += 1
+    if hunts > 3:
+        violations.append(Violation(
+            rows[-1][0] if rows else 1, "GW019", "",
+            "groundwork is not clean after three hunts; stop and name the open absence ids"))
+    if complete > 1:
+        violations.append(Violation(
+            rows[-1][0] if rows else 1, "GW020", "",
+            "only one round may claim completeness"))
+
+
 def row_id(number, fields, prefix, violations):
     match = ID_RE.match(fields[0].strip()) if fields else None
     if not match or match.group(1) != prefix or len(fields) < 2:
@@ -289,12 +380,13 @@ def row_id(number, fields, prefix, violations):
     return match.group(1) + match.group(2)
 
 
-def validate(text):
+def validate(text, project=None):
     lines = text.splitlines()
     violations = []
     sections = parse_sections(lines)
     check_structure(sections, violations)
     check_placeholders(lines, violations)
+    check_tree(lines, violations, project)
 
     bodies = {}
     for name, heading_line, body in sections:
@@ -334,6 +426,8 @@ def validate(text):
         check_plan(bodies["plan"][1], violations)
     if "unknowns" in bodies:
         check_unknowns(bodies["unknowns"][1], violations, unknown_ids)
+    if "hunts" in bodies:
+        check_hunts(bodies["hunts"][1], violations)
 
     for name in SECTIONS:
         if name not in bodies:
@@ -376,7 +470,11 @@ def main(argv):
             sys.stderr.write("validate_record.py: %s\n" % error)
         return 2
 
-    violations = validate(text)
+    project = os.path.dirname(os.path.abspath(path))
+    while project != os.path.dirname(project) and not os.path.exists(
+            os.path.join(project, ".git")):
+        project = os.path.dirname(project)
+    violations = validate(text, project=project)
     if args.as_json:
         print(json.dumps({
             "ok": not violations,
@@ -391,7 +489,7 @@ def main(argv):
                   % len(violations))
         else:
             print("%s: clean — %d rows." % (path, len(re.findall(
-                r"(?m)^[-*]\s+[FBIPU][0-9]", text))))
+                r"(?m)^[-*]\s+[FBIPUH][0-9]", text))))
     return 1 if violations else 0
 
 

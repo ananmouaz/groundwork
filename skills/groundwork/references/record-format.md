@@ -1,8 +1,12 @@
 # The record format
 
-One markdown file. Six sections, in this order: Task, Facts, Blast radius,
-Invariants, Plan, Unknowns. Every row is a top-level list item whose fields are
+One markdown file. Seven sections, in this order: Task, Facts, Blast radius,
+Invariants, Plan, Unknowns, Hunts. Every row is a top-level list item whose fields are
 separated by an em dash (`—`) or a double hyphen (`--`), starting with an id.
+
+Immediately below the title, `Tree:` holds the first field printed by
+`git status --porcelain | shasum`. Refresh it immediately before each round.
+Validation fails as soon as the working tree no longer has that digest.
 
 Indented bullets under a row are notes. The validator ignores them, so use them
 freely for the detail that does not fit on the line.
@@ -98,6 +102,14 @@ comes from.
 `none` as the whole section only when the blast radius has no `UNKNOWN` row and
 you have read it twice.
 
+## Hunts — `H1 — hunt — gaps — 2`
+
+Append one row after each round. Fields are the consecutive round number, kind
+(`hunt` or `confirmation`), verdict (`gaps`, `complete`, or `widened`), and
+absence count. Never rewrite an earlier row. More than three `hunt` rows or
+more than one `complete` verdict invalidates the record; confirmations do not
+consume the three-hunt budget.
+
 ## The rule table
 
 `validate_record.py --rules` prints this list.
@@ -120,6 +132,10 @@ you have read it twice.
 | GW014 | a row refers to an id that does not exist |
 | GW015 | template placeholder text was left in |
 | GW016 | an unknown names no way to resolve it |
+| GW017 | Tree is missing, malformed, or no longer matches the working tree |
+| GW018 | a hunt row is malformed or rounds are not consecutive |
+| GW019 | the record contains more than three full hunts |
+| GW020 | more than one hunt row claims completeness |
 
 What the validator cannot check: whether a command proves its claim, whether
 the enumeration was wide enough, whether a SAFE verdict was read or assumed.
